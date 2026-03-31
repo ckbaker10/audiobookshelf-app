@@ -109,11 +109,19 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
           soughtBackForInterruption = true
         }
       }
-      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
-      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
         // Transient focus loss: ringtone, assistant, notifications — pause and auto-resume when focus returns
         if (isStarted && currentPlayer.isPlaying) {
           Log.d(tag, "Audio focus lost (transient), pausing")
+          currentPlayer.pause()
+          resumeAfterFocus = true
+        }
+      }
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+        // Duck: notification sound, etc. — seek back 1 second, pause, and auto-resume when focus returns
+        if (isStarted && currentPlayer.isPlaying) {
+          Log.d(tag, "Audio focus lost (duck), seeking back 1 second and pausing")
+          seekBackward(1000L)
           currentPlayer.pause()
           resumeAfterFocus = true
         }
