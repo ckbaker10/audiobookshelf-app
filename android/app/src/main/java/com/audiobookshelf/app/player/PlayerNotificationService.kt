@@ -53,6 +53,8 @@ import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.upstream.*
 import java.util.*
+import android.telephony.PhoneStateListener
+import android.telephony.TelephonyManager
 import kotlin.concurrent.schedule
 import kotlinx.coroutines.runBlocking
 
@@ -88,6 +90,17 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     fun onMediaItemHistoryUpdated(mediaItemHistory: MediaItemHistory)
     fun onPlaybackSpeedChanged(playbackSpeed: Float)
   }
+  @Suppress("DEPRECATION")
+  private val phoneStateListener = object : PhoneStateListener() {
+    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
+      if (state == TelephonyManager.CALL_STATE_RINGING && isStarted && currentPlayer.isPlaying) {
+        Log.d(tag, "Incoming call detected, seeking back 10 seconds and pausing")
+        seekBackward(10000L)
+        pause()
+      }
+    }
+  }
+
   private val binder = LocalBinder()
 
   var clientEventEmitter: ClientEventEmitter? = null
@@ -199,6 +212,14 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaSession.release()
     mediaProgressSyncer.reset()
 
+    try {
+      val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+      @Suppress("DEPRECATION")
+      telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE)
+    } catch (error: Exception) {
+      Log.e(tag, "Error unregistering phone state listener $error")
+    }
+
     super.onDestroy()
   }
 
@@ -214,6 +235,11 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     Log.d(tag, "onCreate")
     super.onCreate()
     ctx = this
+
+    // Register phone state listener to seek back on incoming calls
+    val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+    @Suppress("DEPRECATION")
+    telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
 
     // Initialize Paper
     DbManager.initialize(ctx)
