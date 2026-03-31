@@ -53,8 +53,6 @@ import com.google.android.exoplayer2.source.hls.HlsMediaSource
 import com.google.android.exoplayer2.ui.PlayerNotificationManager
 import com.google.android.exoplayer2.upstream.*
 import java.util.*
-import android.telephony.PhoneStateListener
-import android.telephony.TelephonyManager
 import kotlin.concurrent.schedule
 import kotlinx.coroutines.runBlocking
 
@@ -90,13 +88,45 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     fun onMediaItemHistoryUpdated(mediaItemHistory: MediaItemHistory)
     fun onPlaybackSpeedChanged(playbackSpeed: Float)
   }
-  @Suppress("DEPRECATION")
-  private val phoneStateListener = object : PhoneStateListener() {
-    override fun onCallStateChanged(state: Int, phoneNumber: String?) {
-      if (state == TelephonyManager.CALL_STATE_RINGING && isStarted && currentPlayer.isPlaying) {
-        Log.d(tag, "Incoming call detected, seeking back 10 seconds and pausing")
-        seekBackward(10000L)
-        pause()
+  private var resumeAfterFocus = false
+  var soughtBackForInterruption = false
+
+  private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+    when (focusChange) {
+      AudioManager.AUDIOFOCUS_LOSS -> {
+        // Long-term focus loss: phone call, VoIP (WhatsApp), etc.
+        if (isStarted) {
+          if (currentPlayer.isPlaying) {
+            Log.d(tag, "Audio focus lost (call), seeking back 10 seconds and pausing")
+            seekBackward(10000L)
+            currentPlayer.pause()
+          } else if (!soughtBackForInterruption) {
+            // Already paused by ringtone (LOSS_TRANSIENT), seek back from current position
+            Log.d(tag, "Audio focus lost (call) while paused by ringtone, seeking back 10 seconds")
+            seekBackward(10000L)
+          }
+          resumeAfterFocus = false
+          soughtBackForInterruption = true
+        }
+      }
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
+      AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+        // Transient focus loss: ringtone, assistant, notifications — pause and auto-resume when focus returns
+        if (isStarted && currentPlayer.isPlaying) {
+          Log.d(tag, "Audio focus lost (transient), pausing")
+          currentPlayer.pause()
+          resumeAfterFocus = true
+        }
+      }
+      AudioManager.AUDIOFOCUS_GAIN -> {
+        if (isStarted) {
+          currentPlayer.volume = 1.0f
+          if (resumeAfterFocus) {
+            Log.d(tag, "Audio focus gained, resuming playback")
+            currentPlayer.play()
+            resumeAfterFocus = false
+          }
+        }
       }
     }
   }
@@ -212,13 +242,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaSession.release()
     mediaProgressSyncer.reset()
 
-    try {
-      val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-      @Suppress("DEPRECATION")
-      telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE)
-    } catch (error: Exception) {
-      Log.e(tag, "Error unregistering phone state listener $error")
-    }
+    abandonAudioFocus()
 
     super.onDestroy()
   }
@@ -235,11 +259,6 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     Log.d(tag, "onCreate")
     super.onCreate()
     ctx = this
-
-    // Register phone state listener to seek back on incoming calls
-    val telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-    @Suppress("DEPRECATION")
-    telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
 
     // Initialize Paper
     DbManager.initialize(ctx)
@@ -420,7 +439,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                     .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                     .build()
-    mPlayer.setAudioAttributes(audioAttributes, true)
+    mPlayer.setAudioAttributes(audioAttributes, false) // We manage audio focus ourselves
 
     // attach player to playerNotificationManager
     playerNotificationManager.setPlayer(mPlayer)
@@ -953,11 +972,24 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     return false
   }
 
+  @Suppress("DEPRECATION")
+  private fun requestAudioFocus() {
+    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.requestAudioFocus(audioFocusChangeListener, AudioManager.STREAM_MUSIC, AudioManager.AUDIOFOCUS_GAIN)
+  }
+
+  @Suppress("DEPRECATION")
+  private fun abandonAudioFocus() {
+    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    audioManager.abandonAudioFocus(audioFocusChangeListener)
+  }
+
   fun play() {
     if (currentPlayer.isPlaying) {
       Log.d(tag, "Already playing")
       return
     }
+    requestAudioFocus()
     currentPlayer.volume = 1F
     currentPlayer.play()
   }

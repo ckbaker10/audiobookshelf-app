@@ -61,7 +61,11 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
 
     if (isPlaying) {
       Log.d(tag, "SeekBackTime: Player is playing")
-      if (lastPauseTime > 0 && DeviceManager.deviceData.deviceSettings?.disableAutoRewind != true) {
+      if (playerNotificationService.soughtBackForInterruption) {
+        // Already seeked back 10s when the call started — skip additional seek-back
+        playerNotificationService.soughtBackForInterruption = false
+        lastPauseTime = 0
+      } else if (lastPauseTime > 0 && DeviceManager.deviceData.deviceSettings?.disableAutoRewind != true) {
         Log.d(tag, "SeekBackTime: playing started now set seek back time $lastPauseTime")
         var seekBackTime = calcPauseSeekBackTime()
         if (seekBackTime > 0) {
