@@ -38,7 +38,9 @@ data class DownloadItemPart(
         @JsonIgnore
         var lastProgressUpdate: Long = 0, // Start at 0, will be set on first progress update
         @JsonIgnore var lastProgress: Long = 0,
-        @JsonIgnore var stallCount: Int = 0
+        @JsonIgnore var stallCount: Int = 0,
+        /** True while waiting for network to return; the watcher loop skips paused parts. */
+        @JsonIgnore var paused: Boolean = false
 ) {
   companion object {
     fun make(

@@ -16,7 +16,7 @@ class InternalDownloadManager(
 ) : AutoCloseable {
 
   private val tag = "InternalDownloadManager"
-  private val client: OkHttpClient = MtlsManager.getClient(connectTimeout = 30)
+  private val client: OkHttpClient = MtlsManager.getClient(connectTimeout = 30, readTimeout = 60)
   private val writer = BinaryFileWriter(outputStream, progressCallback)
   /** The in-flight OkHttp call; used by [cancel] to abort an ongoing download. */
   private var activeCall: Call? = null
@@ -32,13 +32,20 @@ class InternalDownloadManager(
   }
 
   /**
-   * Downloads a file from the given URL.
+   * Downloads a file from the given URL, optionally resuming from [resumeFrom] bytes.
    *
-   * @param url The URL to download the file from.
+   * When [resumeFrom] > 0 the request includes a Range header. A 206 response appends to
+   * the existing partial file; a 200 response means the server does not support ranges and
+   * the caller is responsible for having opened the stream in truncate mode.
    */
-  fun download(url: String) {
-    val request: Request = Request.Builder().url(url).addHeader("Accept-Encoding", "identity").build()
-    activeCall = client.newCall(request)
+  fun download(url: String, resumeFrom: Long = 0L) {
+    val requestBuilder = Request.Builder()
+            .url(url)
+            .addHeader("Accept-Encoding", "identity")
+    if (resumeFrom > 0L) {
+      requestBuilder.addHeader("Range", "bytes=$resumeFrom-")
+    }
+    activeCall = client.newCall(requestBuilder.build())
     activeCall!!.enqueue(
             object : Callback {
               override fun onFailure(call: Call, e: IOException) {
@@ -47,9 +54,17 @@ class InternalDownloadManager(
               }
 
               override fun onResponse(call: Call, response: Response) {
+                if (!response.isSuccessful && response.code != 206) {
+                  Log.e(tag, "Download URL $url returned HTTP ${response.code}")
+                  progressCallback.onComplete(true)
+                  return
+                }
                 response.body?.let { responseBody ->
-                  val length: Long = response.header("Content-Length")?.toLongOrNull() ?: 0L
-                  writer.write(responseBody.byteStream(), length, call::isCanceled)
+                  // Content-Length on a 206 is the remaining bytes; add the already-written
+                  // offset so progress percentage is computed against the full file size.
+                  val remaining: Long = response.header("Content-Length")?.toLongOrNull() ?: 0L
+                  val totalLength = if (response.code == 206) resumeFrom + remaining else remaining
+                  writer.write(responseBody.byteStream(), totalLength, resumeFrom, call::isCanceled)
                 } ?: run {
                   Log.e(tag, "Response doesn't contain a file")
                   progressCallback.onComplete(true)
@@ -82,24 +97,32 @@ class BinaryFileWriter(
 ) : AutoCloseable {
 
   /**
-   * Writes data from the input stream to the output stream.
+   * Writes data from [inputStream] to the output stream.
    *
-   * @param inputStream The input stream to read the data from.
-   * @param length The total length of the data to be written.
+   * @param inputStream Source stream.
+   * @param totalFileLength Full expected file size (used for progress percentage).
+   * @param bytesAlreadyWritten Bytes already on disk from a previous partial download;
+   *   progress callbacks include this offset so the percentage reflects the whole file.
    * @param isCancelled Optional lambda checked each chunk; when true the write aborts cleanly.
-   * @return The total number of bytes written.
    */
-  fun write(inputStream: InputStream, length: Long, isCancelled: () -> Boolean = { false }): Long {
-    var totalBytes: Long = 0
+  fun write(
+          inputStream: InputStream,
+          totalFileLength: Long,
+          bytesAlreadyWritten: Long = 0L,
+          isCancelled: () -> Boolean = { false }
+  ): Long {
+    var newBytes: Long = 0
     var onCompleteCalled = false
     try {
       BufferedInputStream(inputStream).use { input ->
         val dataBuffer = ByteArray(CHUNK_SIZE)
         var readBytes: Int = input.read(dataBuffer)
         while (!isCancelled() && readBytes != -1) {
-          totalBytes += readBytes
+          newBytes += readBytes
           outputStream.write(dataBuffer, 0, readBytes)
-          progressCallback.onProgress(totalBytes, (totalBytes * 100L) / length)
+          val written = bytesAlreadyWritten + newBytes
+          val progress = if (totalFileLength > 0) (written * 100L) / totalFileLength else 0L
+          progressCallback.onProgress(written, progress)
           readBytes = input.read(dataBuffer)
         }
         // Report cancellation as failure so the caller can clean up
@@ -110,7 +133,7 @@ class BinaryFileWriter(
       // Stream closed due to call cancellation or network error
       if (!onCompleteCalled) progressCallback.onComplete(true)
     }
-    return totalBytes
+    return newBytes
   }
 
   /**

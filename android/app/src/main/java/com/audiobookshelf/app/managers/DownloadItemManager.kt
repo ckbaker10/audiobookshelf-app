@@ -1,6 +1,11 @@
 package com.audiobookshelf.app.managers
 
 import android.app.DownloadManager
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.net.Uri
 import android.util.Log
 import androidx.documentfile.provider.DocumentFile
@@ -114,6 +119,49 @@ class DownloadItemManager(
 
   // Use a supervised scope instead of GlobalScope for better lifecycle management
   private val downloadScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+  /** Parts interrupted by a network loss; restored to the queue when connectivity returns. */
+  private val pausedDownloadItemParts: MutableList<DownloadItemPart> = mutableListOf()
+
+  private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+    override fun onLost(network: Network) {
+      val inFlight = currentDownloadItemParts.filter { !it.completed && !it.failed }
+      if (inFlight.isNotEmpty()) {
+        Log.i(tag, "networkCallback: Network lost — pausing ${inFlight.size} in-flight part(s)")
+        inFlight.forEach { it.paused = true }
+        pausedDownloadItemParts.addAll(inFlight)
+      }
+    }
+
+    override fun onAvailable(network: Network) {
+      if (pausedDownloadItemParts.isNotEmpty()) {
+        Log.i(tag, "networkCallback: Network available — restoring ${pausedDownloadItemParts.size} paused part(s)")
+        pausedDownloadItemParts.forEach { part ->
+          part.paused = false
+          part.completed = false
+          part.failed = false
+          part.downloadId = null
+        }
+        pausedDownloadItemParts.clear()
+        checkUpdateDownloadQueue()
+      }
+    }
+  }
+
+  init {
+    val networkRequest = NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+            .build()
+    (mainActivity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+            .registerNetworkCallback(networkRequest, networkCallback)
+  }
+
+  /** Unregisters the network callback. Call when the owning component is destroyed. */
+  fun destroy() {
+    (mainActivity.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager)
+            .unregisterNetworkCallback(networkCallback)
+  }
 
   /** Adds a download item to the queue and starts processing the queue. */
   fun addDownloadItem(downloadItem: DownloadItem) {
@@ -231,7 +279,7 @@ class DownloadItemManager(
     }
   }
 
-  /** Starts an internal download. */
+  /** Starts an internal download, writing to a .tmp file and renaming on success. */
   private fun startInternalDownload(downloadItemPart: DownloadItemPart) {
     val serverUrl = downloadItemPart.serverUrl
     AbsLogger.debug(
@@ -253,11 +301,13 @@ class DownloadItemManager(
       return
     }
 
-    // Check if file already exists with correct size
-    val file = File(downloadItemPart.finalDestinationPath)
-    if (file.exists()) {
+    val finalFile = File(downloadItemPart.finalDestinationPath)
+    val tempFile = File(downloadItemPart.finalDestinationPath + ".tmp")
+
+    // Check if finished file already exists with correct size
+    if (finalFile.exists()) {
       val expectedSize = downloadItemPart.fileSize
-      val actualSize = file.length()
+      val actualSize = finalFile.length()
 
       if (actualSize == expectedSize) {
         // File already exists with correct size - mark as completed immediately
@@ -268,7 +318,7 @@ class DownloadItemManager(
 
         AbsLogger.debug(
                 tag,
-                "startInternalDownload: File already exists with correct size: ${file.absolutePath} (${actualSize} bytes)"
+                "startInternalDownload: File already exists with correct size: ${finalFile.absolutePath} (${actualSize} bytes)"
         )
 
         // Use the handler to ensure proper cleanup and queue processing
@@ -278,15 +328,18 @@ class DownloadItemManager(
         // File exists but wrong size - delete it
         AbsLogger.debug(
                 tag,
-                "startInternalDownload: File exists with wrong size: ${file.absolutePath} - expected: ${expectedSize}, actual: ${actualSize}. Deleting."
+                "startInternalDownload: File exists with wrong size: ${finalFile.absolutePath} - expected: ${expectedSize}, actual: ${actualSize}. Deleting."
         )
-        file.delete()
+        finalFile.delete()
       }
     }
 
-    file.parentFile?.mkdirs()
+    finalFile.parentFile?.mkdirs()
 
-    val fileOutputStream = FileOutputStream(downloadItemPart.finalDestinationPath)
+    // Resume from however many bytes are already in the temp file, if any.
+    val resumeFrom = if (tempFile.exists()) tempFile.length() else 0L
+    val fileOutputStream = FileOutputStream(tempFile, resumeFrom > 0L)
+
     val internalProgressCallback =
             object : InternalProgressCallback {
               override fun onProgress(totalBytesWritten: Long, progress: Long) {
@@ -304,11 +357,19 @@ class DownloadItemManager(
               override fun onComplete(failed: Boolean) {
                 downloadItemPart.failed = failed
                 downloadItemPart.completed = true
+                if (!failed) {
+                  // Atomic rename: only expose the file once it is fully written.
+                  if (!tempFile.renameTo(finalFile)) {
+                    Log.e(tag, "Failed to rename ${tempFile.absolutePath} → ${finalFile.absolutePath}")
+                    downloadItemPart.failed = true
+                    tempFile.delete()
+                  }
+                }
                 activeInternalDownloads.remove(downloadItemPart.id)
                 lastProgressEmitTime.remove(downloadItemPart.id)
                 AbsLogger.debug(
                         tag,
-                        "startInternalDownload: Internal download completed for ${downloadItemPart.filename}, failed=$failed"
+                        "startInternalDownload: Internal download completed for ${downloadItemPart.filename}, failed=${downloadItemPart.failed}"
                 )
                 // Use the proper handler to ensure UI updates and cleanup
                 handleInternalDownloadPart(downloadItemPart)
@@ -317,7 +378,7 @@ class DownloadItemManager(
 
     Log.d(
             tag,
-            "Start internal download to destination path ${downloadItemPart.finalDestinationPath} from $serverUrl"
+            "Start internal download to ${downloadItemPart.finalDestinationPath} from $serverUrl (resumeFrom=$resumeFrom)"
     )
     AbsLogger.debug(
             tag,
@@ -325,7 +386,7 @@ class DownloadItemManager(
     )
     InternalDownloadManager(fileOutputStream, internalProgressCallback).also { mgr ->
       activeInternalDownloads[downloadItemPart.id] = mgr
-      mgr.download(serverUrl)
+      mgr.download(serverUrl, resumeFrom)
     }
     downloadItemPart.downloadId = 1
     currentDownloadItemParts.add(downloadItemPart)
@@ -372,7 +433,7 @@ class DownloadItemManager(
         Log.d(tag, "Starting watching downloads")
 
         while (currentDownloadItemParts.isNotEmpty()) {
-          val itemParts = currentDownloadItemParts.filter { !it.isMoving }
+          val itemParts = currentDownloadItemParts.filter { !it.isMoving && !it.paused }
           for (downloadItemPart in itemParts) {
             if (downloadItemPart.isInternalStorage) {
               handleInternalDownloadPart(downloadItemPart)
@@ -469,6 +530,18 @@ class DownloadItemManager(
     clientEventEmitter.onDownloadItemPartUpdate(downloadItemPart)
 
     if (downloadItemPart.completed) {
+      if (downloadItemPart.failed) {
+        if (downloadItemPart.paused) {
+          // Network interruption: keep .tmp so the download can resume from its byte offset.
+          // The NetworkCallback will reset and re-queue this part when connectivity returns.
+          Log.d(tag, "handleInternalDownloadPart: Keeping .tmp for paused part ${downloadItemPart.filename}")
+        } else {
+          // Permanent failure: remove any partial files so the folder scanner never
+          // registers a corrupt file as a completed download.
+          File(downloadItemPart.finalDestinationPath).delete()
+          File(downloadItemPart.finalDestinationPath + ".tmp").delete()
+        }
+      }
       val downloadItem = downloadItemQueue.find { it.id == downloadItemPart.downloadItemId }
       downloadItem?.let {
         // Save the download item state immediately after each file is completed

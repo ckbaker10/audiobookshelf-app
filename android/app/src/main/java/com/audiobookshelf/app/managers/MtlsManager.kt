@@ -60,7 +60,8 @@ object MtlsManager {
    */
   fun getClient(
     connectTimeout: Long = 0,
-    callTimeout: Long = 0
+    callTimeout: Long = 0,
+    readTimeout: Long = 0
   ): OkHttpClient {
     val builder = OkHttpClient.Builder()
 
@@ -73,6 +74,7 @@ object MtlsManager {
 
     if (connectTimeout > 0) builder.connectTimeout(connectTimeout, TimeUnit.SECONDS)
     if (callTimeout > 0) builder.callTimeout(callTimeout, TimeUnit.SECONDS)
+    if (readTimeout > 0) builder.readTimeout(readTimeout, TimeUnit.SECONDS)
     return builder.build()
   }
 
