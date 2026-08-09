@@ -48,8 +48,7 @@ package. Use JUnit 4, MockK, MockWebServer, and `kotlinx-coroutines-test` as nee
 Keep test inputs deterministic; do not depend on Android device services, sleeps, or
 external network access.
 
-Regression specifications for known `master` defects use JUnit's `@Ignore` with a
-reason beginning `Known current-master defect:`. This keeps the coverage branch
-green without hiding the faulty contract: skipped cases remain visible in the test
-report. Remove `@Ignore` on a candidate fix branch to prove that specific behavior
-before porting a production change.
+Regression specifications for known `master` defects are normal, enabled tests.
+They are expected to make this characterization branch red while the defects remain
+in production. A candidate fix is successful only when its corresponding regression
+test changes from failing to passing without weakening the assertion.

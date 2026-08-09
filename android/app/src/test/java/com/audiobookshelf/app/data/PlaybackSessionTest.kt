@@ -2,11 +2,9 @@ package com.audiobookshelf.app.data
 
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
-import org.junit.Ignore
 import org.junit.Test
 
 class PlaybackSessionTest {
-  @Ignore("Known current-master defect: empty playback queues lead to invalid indices and division by zero")
   @Test
   fun `empty track list returns safe neutral timing values`() {
     val session = playbackSession(currentTime = 12.0)
@@ -30,7 +28,6 @@ class PlaybackSessionTest {
     assertEquals(0L, session.getCurrentTrackTimeMs())
   }
 
-  @Ignore("Known current-master defect: playback progress is not clamped to one")
   @Test
   fun `time beyond duration uses final track and clamps progress`() {
     val tracks = mutableListOf(audioTrack(0, 0.0, 10.0), audioTrack(1, 10.0, 5.0))
@@ -41,7 +38,6 @@ class PlaybackSessionTest {
     assertEquals(1.0, session.progress, 0.0)
   }
 
-  @Ignore("Known current-master defect: negative and non-finite playback positions leak into progress")
   @Test
   fun `negative and non-finite positions produce safe progress`() {
     val tracks = mutableListOf(audioTrack(duration = 10.0))

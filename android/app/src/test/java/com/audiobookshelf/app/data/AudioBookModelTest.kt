@@ -3,7 +3,6 @@ package com.audiobookshelf.app.data
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Ignore
 import org.junit.Test
 
 class AudioBookModelTest {
@@ -49,7 +48,6 @@ class AudioBookModelTest {
     assertEquals(5.0, media.duration ?: -1.0, 0.0)
   }
 
-  @Ignore("Known current-master defect: adding to a null track list silently drops the track")
   @Test
   fun `book add track initializes absent track collection`() {
     val media = book(tracks = null)

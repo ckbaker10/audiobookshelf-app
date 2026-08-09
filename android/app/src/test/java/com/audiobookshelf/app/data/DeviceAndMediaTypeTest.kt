@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Ignore
 import org.junit.Test
 
 class DeviceAndMediaTypeTest {
@@ -17,7 +16,6 @@ class DeviceAndMediaTypeTest {
     assertFalse(localFile(null).isAudioFile())
   }
 
-  @Ignore("Known current-master defect: MIME values are not normalized")
   @Test
   fun `audio mime detection tolerates case whitespace and parameters`() {
     assertTrue(localFile(" Audio/MPEG; charset=binary ").isAudioFile())
@@ -34,7 +32,6 @@ class DeviceAndMediaTypeTest {
     assertNull(localFile("text/plain").getEBookFormat())
   }
 
-  @Ignore("Known current-master defect: ebook MIME values are not normalized")
   @Test
   fun `ebook format detection tolerates case and parameters`() {
     assertEquals("pdf", localFile("Application/PDF; charset=binary").getEBookFormat())
@@ -73,7 +70,6 @@ class DeviceAndMediaTypeTest {
     assertEquals(config, DeviceData(mutableListOf(config), "one", null, null).getLastServerConnectionConfig())
   }
 
-  @Ignore("Known current-master defect: null podcast episodes are force-cast")
   @Test
   fun `podcast accepts tracks when episodes were absent`() {
     val podcast =

@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Ignore
 import org.junit.Test
 
 class ProgressAndCollectionTest {
@@ -14,7 +13,6 @@ class ProgressAndCollectionTest {
     assertEquals(43, localProgress(0.426).progressPercent)
   }
 
-  @Ignore("Known current-master defect: progress percentage is not bounded for deviant inputs")
   @Test
   fun `progress percentage handles infinite and out-of-range inputs`() {
     assertEquals(0, localProgress(Double.POSITIVE_INFINITY).progressPercent)
@@ -22,7 +20,6 @@ class ProgressAndCollectionTest {
     assertEquals(100, localProgress(1.2).progressPercent)
   }
 
-  @Ignore("Known current-master defect: book progress matches podcast episodes on the same item")
   @Test
   fun `book progress does not match an episode from same library item`() {
     val local = localProgress(episodeId = null)
@@ -64,7 +61,6 @@ class ProgressAndCollectionTest {
     assertNull(progress.finishedAt)
   }
 
-  @Ignore("Known current-master defect: empty series arrays are indexed directly")
   @Test
   fun `empty series metadata produces empty sequence without throwing`() {
     val item = libraryItem(book(series = emptyList()))
@@ -73,7 +69,6 @@ class ProgressAndCollectionTest {
     assertEquals(listOf(""), item.seriesSequenceParts)
   }
 
-  @Ignore("Known current-master defect: collection counting force-casts all media to Book")
   @Test
   fun `collection ignores non-book media when counting audiobooks`() {
     val collection =
@@ -92,7 +87,6 @@ class ProgressAndCollectionTest {
     assertEquals(1, collection.audiobookCount)
   }
 
-  @Ignore("Known current-master defect: absent author count and items are force-unwrapped")
   @Test
   fun `author without count or loaded items reports zero books`() {
     val author = LibraryAuthorItem("author", "library", "Author", null, null, 0, 0, null, null, null)
