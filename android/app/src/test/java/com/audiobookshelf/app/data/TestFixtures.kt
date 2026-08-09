@@ -115,6 +115,33 @@ internal fun playbackSession(
                 mediaPlayer = "local"
         )
 
+internal fun localLibraryItem(
+        id: String = "local-item",
+        media: MediaType = book(),
+        mediaType: String = "book",
+        libraryItemId: String? = "library-item",
+        serverUserId: String? = "user",
+        coverContentUrl: String? = null
+) =
+        LocalLibraryItem(
+                id = id,
+                folderId = "folder",
+                basePath = "/local",
+                absolutePath = "/local/item",
+                contentUrl = "",
+                isInvalid = false,
+                mediaType = mediaType,
+                media = media,
+                localFiles = mutableListOf(),
+                coverContentUrl = coverContentUrl,
+                coverAbsolutePath = null,
+                isLocal = true,
+                serverConnectionConfigId = "server",
+                serverAddress = "https://example.invalid",
+                serverUserId = serverUserId,
+                libraryItemId = libraryItemId
+        )
+
 internal fun localProgress(
         progress: Double = 0.0,
         libraryItemId: String? = "library-item",
