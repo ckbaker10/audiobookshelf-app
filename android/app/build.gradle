@@ -160,7 +160,13 @@ tasks.register('jacocoDebugUnitTestReport', JacocoReport) {
     html.required = true
   }
 
-  def excludes = ['**/R.class', '**/R$*.class', '**/BuildConfig.*', '**/Manifest*.*']
+  def excludes = [
+    '**/R.class',
+    '**/R$*.class',
+    '**/BuildConfig.*',
+    '**/Manifest*.*',
+    '**/databinding/**'
+  ]
   def kotlinClasses = fileTree(dir: "$buildDir/tmp/kotlin-classes/debug", excludes: excludes)
   def javaClasses = fileTree(dir: "$buildDir/intermediates/javac/debug/compileDebugJavaWithJavac/classes", excludes: excludes)
   classDirectories.setFrom(files(kotlinClasses, javaClasses))

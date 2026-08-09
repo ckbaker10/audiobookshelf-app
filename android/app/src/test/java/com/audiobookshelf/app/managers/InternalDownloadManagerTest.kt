@@ -4,7 +4,6 @@ import java.io.File
 import java.nio.file.Files
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import okhttp3.OkHttpClient
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -52,11 +51,10 @@ class InternalDownloadManagerTest {
                     .setBody("abcdef")
                     .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
     )
-    val client = OkHttpClient.Builder().build()
     val destination = File(downloadDirectory, "book.part")
     val callback = RecordingCallback()
 
-    InternalDownloadManager(destination, 6, callback, hasAvailableSpace = { true }, client)
+    InternalDownloadManager(destination, 6, callback, hasAvailableSpace = { true })
             .download(server.url("/interrupted").toString(), "token")
 
     callback.awaitCompletion()
@@ -85,14 +83,96 @@ class InternalDownloadManagerTest {
     assertEquals(100L, callback.progressUpdates.last().second)
   }
 
-  private fun download(destination: File, expectedSize: Long): RecordingCallback {
+  @Test
+  fun `server ignoring range restarts staging file instead of appending`() {
+    server.enqueue(MockResponse().setResponseCode(200).setBody("abcd"))
+    val destination = File(downloadDirectory, "book.part").apply { writeText("ab") }
+    val callback = download(destination, expectedSize = 4)
+
+    callback.awaitCompletion()
+
+    assertFalse(callback.failed)
+    assertArrayEquals("abcd".toByteArray(), destination.readBytes())
+    assertEquals("bytes=2-", server.takeRequest().getHeader("Range"))
+  }
+
+  @Test
+  fun `invalid content range fails without overwriting partial data`() {
+    server.enqueue(
+            MockResponse()
+                    .setResponseCode(206)
+                    .setHeader("Content-Range", "bytes 1-2/4")
+                    .setBody("cd")
+    )
+    val destination = File(downloadDirectory, "book.part").apply { writeText("ab") }
+    val callback = download(destination, expectedSize = 4)
+
+    callback.awaitCompletion()
+
+    assertTrue(callback.failed)
+    assertArrayEquals("ab".toByteArray(), destination.readBytes())
+  }
+
+  @Test
+  fun `range not satisfiable succeeds when staging file is already complete`() {
+    server.enqueue(MockResponse().setResponseCode(416))
+    val destination = File(downloadDirectory, "book.part").apply { writeText("abcd") }
+    val callback = download(destination, expectedSize = 4)
+
+    callback.awaitCompletion()
+
+    assertFalse(callback.failed)
+    assertEquals(listOf(4L to 100L), callback.progressUpdates)
+  }
+
+  @Test
+  fun `http error reports failure exactly once`() {
+    server.enqueue(MockResponse().setResponseCode(500))
+    val callback = download(File(downloadDirectory, "book.part"), expectedSize = 4)
+
+    callback.awaitCompletion()
+
+    assertTrue(callback.failed)
+    assertEquals(1, callback.completionCount)
+  }
+
+  @Test
+  fun `storage rejection fails without consuming full response`() {
+    server.enqueue(MockResponse().setBody("abcd"))
+    val destination = File(downloadDirectory, "book.part")
+    val callback = download(destination, expectedSize = 4, hasAvailableSpace = { false })
+
+    callback.awaitCompletion()
+
+    assertTrue(callback.failed)
+    assertEquals(0L, destination.length())
+  }
+
+  @Test
+  fun `download request sends token without placing it in url`() {
+    server.enqueue(MockResponse().setBody("abcd"))
+    val callback = download(File(downloadDirectory, "book.part"), expectedSize = 4)
+
+    callback.awaitCompletion()
+    val request = server.takeRequest()
+
+    assertFalse(callback.failed)
+    assertEquals("Bearer token", request.getHeader("Authorization"))
+    assertEquals("identity", request.getHeader("Accept-Encoding"))
+    assertFalse(request.path.orEmpty().contains("token"))
+  }
+
+  private fun download(
+          destination: File,
+          expectedSize: Long,
+          hasAvailableSpace: () -> Boolean = { true }
+  ): RecordingCallback {
     val callback = RecordingCallback()
     InternalDownloadManager(
                     destination,
                     expectedSize,
                     callback,
-                    hasAvailableSpace = { true },
-                    client = OkHttpClient.Builder().build()
+                    hasAvailableSpace = hasAvailableSpace
             )
             .download(server.url("/download").toString(), "token")
     return callback
@@ -103,6 +183,8 @@ class InternalDownloadManagerTest {
     val progressUpdates = mutableListOf<Pair<Long, Long>>()
     var failed = false
       private set
+    var completionCount = 0
+      private set
 
     override fun onProgress(totalBytesWritten: Long, progress: Long) {
       progressUpdates += totalBytesWritten to progress
@@ -110,6 +192,7 @@ class InternalDownloadManagerTest {
 
     override fun onComplete(failed: Boolean) {
       this.failed = failed
+      completionCount++
       completion.countDown()
     }
 

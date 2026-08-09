@@ -47,3 +47,9 @@ Place Kotlin host tests under `android/app/src/test/java`, mirroring the product
 package. Use JUnit 4, MockK, MockWebServer, and `kotlinx-coroutines-test` as needed.
 Keep test inputs deterministic; do not depend on Android device services, sleeps, or
 external network access.
+
+Regression specifications for known `master` defects use JUnit's `@Ignore` with a
+reason beginning `Known current-master defect:`. This keeps the coverage branch
+green without hiding the faulty contract: skipped cases remain visible in the test
+report. Remove `@Ignore` on a candidate fix branch to prove that specific behavior
+before porting a production change.

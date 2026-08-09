@@ -16,8 +16,7 @@ class InternalDownloadManager(
         private val destinationFile: File,
         private val expectedSize: Long,
         private val progressCallback: DownloadItemManager.InternalProgressCallback,
-        private val hasAvailableSpace: () -> Boolean,
-        private val client: OkHttpClient = defaultClient
+        private val hasAvailableSpace: () -> Boolean
 ) {
   private val tag = "InternalDownloadManager"
   /**
@@ -126,7 +125,7 @@ class InternalDownloadManager(
   private companion object {
     const val CHUNK_SIZE = 512 * 1024 // 512 KB
     val CONTENT_RANGE = Regex("bytes (\\d+)-(\\d+)/(?:\\d+|\\*)")
-    val defaultClient =
+    val client =
             OkHttpClient.Builder()
                     .connectTimeout(30, TimeUnit.SECONDS)
                     .readTimeout(60, TimeUnit.SECONDS)
