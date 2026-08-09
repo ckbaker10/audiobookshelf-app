@@ -64,6 +64,13 @@ android {
   testOptions {
     unitTests.returnDefaultValues = true
     unitTests.all {
+      // Capacitor classes (e.g. JSObject) are compiled for Java 21; the app's Kotlin
+      // toolchain is 17. Test runtime only - does not affect assembleDebug.
+      javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(21) }
+      // PaperDb's Kryo serializer reflects into java.util/java.lang on JDK 21+.
+      jvmArgs '--add-opens=java.base/java.util=ALL-UNNAMED',
+              '--add-opens=java.base/java.lang=ALL-UNNAMED',
+              '--add-opens=java.base/java.math=ALL-UNNAMED'
       testLogging {
         events 'failed', 'skipped'
         exceptionFormat 'full'
