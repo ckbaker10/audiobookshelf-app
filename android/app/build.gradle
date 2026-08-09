@@ -62,6 +62,7 @@ android {
     }
   }
   testOptions {
+    unitTests.returnDefaultValues = true
     unitTests.all {
       testLogging {
         events 'failed', 'skipped'
