@@ -165,6 +165,240 @@ class MediaManagerTest {
     assertNull("a different, never-loaded id should not resolve", mediaManager.getById("item-2"))
   }
 
+  @Test
+  fun `loadLibrarySeriesWithAudio filters out series with no audiobooks and caches the result`() {
+    val withAudio = seriesJson("series-1", "Zeta Series", hasAudio = true)
+    val withoutAudio = seriesJson("series-2", "Alpha Series", hasAudio = false)
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply { put("results", JSONArray().put(JSONObject(withAudio)).put(JSONObject(withoutAudio))) }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<com.audiobookshelf.app.data.LibrarySeriesItem>? = null
+    mediaManager.loadLibrarySeriesWithAudio("lib-1") {
+      result = it
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    assertEquals(listOf("series-1"), result?.map { it.id })
+    // A second call must be served from the cache - no second request to the server.
+    assertEquals(1, server.requestCount)
+  }
+
+  @Test
+  fun `loadLibrarySeriesWithAudio filter overload matches by uppercase title prefix on a cold cache`() {
+    // loadLibrarySeriesWithAudio(libraryId, seriesFilter, cb) kicks off an async server load when
+    // the series cache is cold (`loadLibrarySeriesWithAudio(libraryId) {}` - fire and forget), but
+    // then immediately reads `cachedLibrarySeries[libraryId]!!` on the very next line, before that
+    // async load can possibly have completed. That is a guaranteed NullPointerException on every
+    // first call for a library - the paginated/filtered series browse crashes immediately unless
+    // the unfiltered list happens to have been loaded first. This documents the expected contract
+    // (filtered results, no crash even on a cold cache) and currently fails.
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put(
+                              "results",
+                              JSONArray()
+                                      .put(JSONObject(seriesJson("series-1", "Zeta Series", hasAudio = true)))
+                                      .put(JSONObject(seriesJson("series-2", "Alpha Series", hasAudio = true)))
+                      )
+                    }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<com.audiobookshelf.app.data.LibrarySeriesItem>? = null
+    var thrown: Throwable? = null
+    try {
+      mediaManager.loadLibrarySeriesWithAudio("lib-1", "ZETA") {
+        result = it
+        latch.countDown()
+      }
+    } catch (e: Throwable) {
+      thrown = e
+    }
+
+    assertNull("should not throw when the series cache is cold", thrown)
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+    assertEquals(listOf("series-1"), result?.map { it.id })
+  }
+
+  @Test
+  fun `loadAuthorsWithBooks filters authors with no books and sorts by name`() {
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put(
+                              "authors",
+                              JSONArray()
+                                      .put(JSONObject(authorJson("author-1", "Zeta Author", numBooks = 2)))
+                                      .put(JSONObject(authorJson("author-2", "Alpha Author", numBooks = 3)))
+                                      .put(JSONObject(authorJson("author-3", "No Books Author", numBooks = 0)))
+                      )
+                    }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<com.audiobookshelf.app.data.LibraryAuthorItem>? = null
+    mediaManager.loadAuthorsWithBooks("lib-1") {
+      result = it
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    assertEquals(listOf("Alpha Author", "Zeta Author"), result?.map { it.name })
+  }
+
+  @Test
+  fun `loadAuthorsWithBooks filter overload matches by uppercase name prefix on a cold cache`() {
+    // Same defect shape as loadLibrarySeriesWithAudio above: on a cold cache this fires
+    // loadAuthorsWithBooks(libraryId) {} (fire-and-forget async) and then immediately reads
+    // cachedLibraryAuthors[libraryId]!!.values on the next line - a guaranteed NullPointerException
+    // on every first call. Documents the expected contract; currently fails.
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put(
+                              "authors",
+                              JSONArray()
+                                      .put(JSONObject(authorJson("author-1", "Zeta Author", numBooks = 2)))
+                                      .put(JSONObject(authorJson("author-2", "Alpha Author", numBooks = 3)))
+                      )
+                    }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<com.audiobookshelf.app.data.LibraryAuthorItem>? = null
+    var thrown: Throwable? = null
+    try {
+      mediaManager.loadAuthorsWithBooks("lib-1", "ALPHA") {
+        result = it
+        latch.countDown()
+      }
+    } catch (e: Throwable) {
+      thrown = e
+    }
+
+    assertNull("should not throw when the author cache is cold", thrown)
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+    assertEquals(listOf("author-2"), result?.map { it.id })
+  }
+
+  @Test
+  fun `getNextUnfinishedEpisode returns the most recently published unfinished episode`() {
+    val older = podcastEpisode("ep-old", publishedAt = 1_000L)
+    val newer = podcastEpisode("ep-new", publishedAt = 2_000L)
+    val podcast =
+            Podcast(
+                    PodcastMetadata("Cast", null, null, mutableListOf(), false), null,
+                    mutableListOf(), mutableListOf(older, newer), false, 2
+            )
+
+    val result = podcast.getNextUnfinishedEpisode("item-1", mediaManager)
+
+    assertEquals("ep-new", result?.id)
+  }
+
+  @Test
+  fun `getNextUnfinishedEpisode skips episodes with finished server progress`() {
+    val newer = podcastEpisode("ep-new", publishedAt = 2_000L)
+    val older = podcastEpisode("ep-old", publishedAt = 1_000L)
+    val podcast =
+            Podcast(
+                    PodcastMetadata("Cast", null, null, mutableListOf(), false), null,
+                    mutableListOf(), mutableListOf(newer, older), false, 2
+            )
+    mediaManager.serverUserMediaProgress =
+            mutableListOf(
+                    com.audiobookshelf.app.data.MediaProgress(
+                            "p1", "item-1", "ep-new", 10.0, 1.0, 10.0, true, null, null, 0, 0, null
+                    )
+            )
+
+    val result = podcast.getNextUnfinishedEpisode("item-1", mediaManager)
+
+    assertEquals("ep-old", result?.id)
+  }
+
+  @Test
+  fun `getNextUnfinishedEpisode returns null when every episode is finished`() {
+    val ep = podcastEpisode("ep-1", publishedAt = 1_000L)
+    val podcast =
+            Podcast(
+                    PodcastMetadata("Cast", null, null, mutableListOf(), false), null,
+                    mutableListOf(), mutableListOf(ep), false, 1
+            )
+    mediaManager.serverUserMediaProgress =
+            mutableListOf(
+                    com.audiobookshelf.app.data.MediaProgress(
+                            "p1", "item-1", "ep-1", 10.0, 1.0, 10.0, true, null, null, 0, 0, null
+                    )
+            )
+
+    assertNull(podcast.getNextUnfinishedEpisode("item-1", mediaManager))
+  }
+
+  @Test
+  fun `getNextUnfinishedEpisode tolerates episodes with a null publishedAt`() {
+    val noDate = podcastEpisode("ep-no-date", publishedAt = null)
+    val dated = podcastEpisode("ep-dated", publishedAt = 1_000L)
+    val podcast =
+            Podcast(
+                    PodcastMetadata("Cast", null, null, mutableListOf(), false), null,
+                    mutableListOf(), mutableListOf(noDate, dated), false, 2
+            )
+
+    val result = podcast.getNextUnfinishedEpisode("item-1", mediaManager)
+
+    assertNotNull(result)
+  }
+
+  private fun podcastEpisode(id: String, publishedAt: Long?) =
+          PodcastEpisode(
+                  id, 1, null, null, "Episode $id", null, null, null, publishedAt, null,
+                  audioTrack(localFileId = "lf-$id"), null, 10.0, 100L, null, null
+          )
+
+  private fun seriesJson(id: String, name: String, hasAudio: Boolean): String {
+    val tracks =
+            if (hasAudio)
+                    """[{"index":0,"startOffset":0.0,"duration":10.0,"title":"T","contentUrl":"/t","mimeType":null,"metadata":null,"isLocal":false,"localFileId":null,"serverIndex":0}]"""
+            else "[]"
+    return """
+      {
+        "id": "$id", "libraryId": "lib-1", "name": "$name", "description": null,
+        "addedAt": 0, "updatedAt": 0, "localLibraryItemId": null,
+        "books": [
+          {
+            "id": "$id-book", "ino": "ino", "libraryId": "lib-1", "folderId": "folder",
+            "path": "/book", "relPath": "book", "mtimeMs": 0, "ctimeMs": 0, "birthtimeMs": 0,
+            "addedAt": 0, "updatedAt": 0, "isMissing": false, "isInvalid": false, "mediaType": "book",
+            "media": {
+              "metadata": {"title": "Book", "genres": [], "explicit": false, "subtitle": null},
+              "coverPath": null, "tags": [], "tracks": $tracks
+            }
+          }
+        ]
+      }
+    """.trimIndent()
+  }
+
+  private fun authorJson(id: String, name: String, numBooks: Int): String {
+    return """
+      {
+        "id": "$id", "libraryId": "lib-1", "name": "$name", "description": null,
+        "imagePath": null, "addedAt": 0, "updatedAt": 0, "numBooks": $numBooks,
+        "libraryItems": null, "series": null
+      }
+    """.trimIndent()
+  }
+
   /** Loads a single server library item into `serverLibraryItems` via a real collections round trip. */
   private fun loadServerItemIntoCache(id: String, title: String) {
     val itemJson = minimalLibraryItemJson(id, title = title)

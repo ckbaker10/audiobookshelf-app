@@ -35,10 +35,12 @@ object AbsTestEnvironment {
   }
 
   /**
-   * Repoints Paper at a fresh temp directory and clears mutable singleton state.
-   * @return the temp directory backing this reset, in case a test wants to inspect raw files.
+   * Repoints Paper at a fresh temp directory and clears mutable singleton state. Call this from
+   * both `@Before` (so each test starts clean) and `@After` (so a test doesn't leave
+   * `DeviceManager.serverConnectionConfig` pointing at a `MockWebServer` instance it already shut
+   * down, which the next test class to run in this JVM would otherwise inherit).
    */
-  fun reset(): File {
+  fun reset() {
     val dir = File(System.getProperty("java.io.tmpdir"), "abs-test-${System.nanoTime()}")
     dir.mkdirs()
     val ctx = mockk<Context>(relaxed = true)
@@ -53,7 +55,6 @@ object AbsTestEnvironment {
     DeviceManager.serverConnectionConfig = null
     MediaEventManager.clientEventEmitter = null
     AbsLogger.onLogEmitter = null
-    return dir
   }
 
   /**
@@ -72,6 +73,33 @@ object AbsTestEnvironment {
 
   /** A relaxed mock Android `Context`, sufficient for code paths that don't inspect it. */
   fun mockContext(): Context = mockk(relaxed = true)
+
+  /**
+   * Overwrites a `public static final` field (e.g. `android.os.Build.MANUFACTURER`) for the rest
+   * of this JVM's life.
+   *
+   * AGP's mockable `android.jar` nulls out the initializers of static String fields like
+   * `Build.MANUFACTURER`/`Build.MODEL` (they're non-null on a real device, but null under this
+   * stub) - code that reads them directly (not through a method) and forwards them into a
+   * non-null Kotlin parameter throws `NullPointerException` at that call site.
+   * `mockkStatic` cannot help here: it intercepts static *method* calls, but a Kotlin/Java static
+   * field read compiles to a `getstatic` bytecode instruction, not a method call, so there is
+   * nothing for MockK to hook. Reflection alone cannot un-final a field either - JDK 12+ blocks
+   * mutating `Field`'s own `modifiers` field. `sun.misc.Unsafe` bypasses both problems by writing
+   * the field's memory directly. This is inherently JVM-internals-fragile; use it only when a
+   * production code path unconditionally reads a static field that the mockable jar has nulled.
+   */
+  fun setStaticField(clazz: Class<*>, fieldName: String, value: Any?) {
+    val unsafeField = Class.forName("sun.misc.Unsafe").getDeclaredField("theUnsafe")
+    unsafeField.isAccessible = true
+    val unsafe = unsafeField.get(null)
+    val unsafeClass = unsafe.javaClass
+    val field = clazz.getField(fieldName)
+    val base = unsafeClass.getMethod("staticFieldBase", java.lang.reflect.Field::class.java).invoke(unsafe, field)
+    val offset = unsafeClass.getMethod("staticFieldOffset", java.lang.reflect.Field::class.java).invoke(unsafe, field) as Long
+    unsafeClass.getMethod("putObject", Any::class.java, Long::class.javaPrimitiveType, Any::class.java)
+            .invoke(unsafe, base, offset, value)
+  }
 
   /** An [ApiHandler] wired to a mock `Context`; construction alone exercises `SecureStorage`. */
   fun apiHandler(ctx: Context = mockContext()): ApiHandler = ApiHandler(ctx)

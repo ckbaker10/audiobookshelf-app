@@ -1,9 +1,16 @@
 package com.audiobookshelf.app.server
 
 import com.audiobookshelf.app.data.DeviceInfo
+import com.audiobookshelf.app.data.LibraryItemSearchResultType
+import com.audiobookshelf.app.data.LibraryShelfBookEntity
+import com.audiobookshelf.app.data.LibraryShelfType
+import com.audiobookshelf.app.data.LocalMediaProgress
 import com.audiobookshelf.app.data.PlayItemRequestPayload
 import com.audiobookshelf.app.data.ServerConnectionConfig
+import com.audiobookshelf.app.data.audioTrack
+import com.audiobookshelf.app.data.playbackSession
 import com.audiobookshelf.app.device.DeviceManager
+import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.media.MediaProgressSyncData
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
@@ -58,6 +65,9 @@ class ApiHandlerContractTest {
   fun tearDown() {
     unmockkStatic(android.util.Base64::class)
     server.shutdown()
+    // Otherwise DeviceManager.serverConnectionConfig keeps pointing at this now-shut-down
+    // MockWebServer instance for whichever test class the shared JVM runs next.
+    AbsTestEnvironment.reset()
   }
 
   private fun takeRequest(): RecordedRequest =
@@ -383,6 +393,205 @@ class ApiHandlerContractTest {
     assertEquals("POST", request.method)
     assertEquals("/api/authorize", request.path)
     assertEquals(1, progress?.size)
+  }
+
+  @Test
+  fun `getLibraryPersonalized reads library shelf entities from the value array`() {
+    server.enqueue(
+            MockResponse().setBody(
+                    """{"value":[{"type":"book","id":"shelf-1","label":"Continue","total":1,"entities":[${minimalLibraryItemJson("item-1")}]}]}"""
+            )
+    )
+
+    val shelves = awaitCallback<List<LibraryShelfType>?> { handler.getLibraryPersonalized("lib-1", it) }
+    val request = takeRequest()
+
+    assertEquals("/api/libraries/lib-1/personalized", request.path)
+    assertEquals(1, shelves?.size)
+    assertTrue(shelves?.first() is LibraryShelfBookEntity)
+  }
+
+  @Test
+  fun `getLibraryPersonalized reports null on an error response`() {
+    server.enqueue(MockResponse().setBody("""{"error":"failed"}"""))
+
+    val shelves = awaitCallback<List<LibraryShelfType>?> { handler.getLibraryPersonalized("lib-1", it) }
+
+    assertNull(shelves)
+  }
+
+  @Test
+  fun `getSearchResults requests the search endpoint and maps books`() {
+    server.enqueue(
+            MockResponse().setBody(
+                    """{"book":[{"libraryItem": ${minimalLibraryItemJson("item-1")}}],"podcast":null,"series":null,"authors":null}"""
+            )
+    )
+
+    val results = awaitCallback<LibraryItemSearchResultType?> { handler.getSearchResults("lib-1", "hobbit", it) }
+    val request = takeRequest()
+
+    assertEquals("/api/libraries/lib-1/search?q=hobbit", request.path)
+    assertEquals("item-1", results?.book?.first()?.libraryItem?.id)
+  }
+
+  @Test
+  fun `getSearchResults should percent-encode the query string instead of letting it inject extra query parameters`() {
+    // queryString is interpolated directly into the URL with no encoding. A search term
+    // containing '&' should still arrive as a single "q" value; instead OkHttp's URL parser
+    // treats the raw '&' as a query-parameter delimiter, splitting the user's search text into a
+    // second, attacker/user-controlled query parameter.
+    server.enqueue(MockResponse().setBody("""{"book":null,"podcast":null,"series":null,"authors":null}"""))
+
+    awaitCallback<LibraryItemSearchResultType?> { handler.getSearchResults("lib-1", "a&b=c", it) }
+
+    val request = takeRequest()
+    assertEquals(
+            "the whole search text should arrive as the single \"q\" query parameter",
+            "a&b=c",
+            request.requestUrl?.queryParameter("q")
+    )
+  }
+
+  @Test
+  fun `sendLocalProgressSync posts a partial session with device info to the local session endpoint`() {
+    server.enqueue(MockResponse().setBody("""{}"""))
+    val session = playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = 10.0)
+
+    val latch = CountDownLatch(1)
+    var success: Boolean? = null
+    handler.sendLocalProgressSync(session) { ok, _ ->
+      success = ok
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    val request = takeRequest()
+    assertEquals("POST", request.method)
+    assertEquals("/api/session/local", request.path)
+    val body = request.body.readUtf8()
+    assertTrue(body.contains("\"id\":\"${session.id}\""))
+    assertTrue(body.contains("\"deviceInfo\""))
+    assertEquals(true, success)
+  }
+
+  @Test
+  fun `sendLocalProgressSync reports the server-provided error message on failure`() {
+    server.enqueue(MockResponse().setBody("""{"error":"sync rejected"}"""))
+    val session = playbackSession(mutableListOf(audioTrack(duration = 100.0)))
+
+    val latch = CountDownLatch(1)
+    var success: Boolean? = null
+    var error: String? = null
+    handler.sendLocalProgressSync(session) { ok, err ->
+      success = ok
+      error = err
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    assertEquals(false, success)
+    assertEquals("sync rejected", error)
+  }
+
+  @Test
+  fun `sendSyncLocalSessions posts partial sessions and device info to the local-all endpoint`() {
+    mockkStatic(android.provider.Settings.Secure::class)
+    every { android.provider.Settings.Secure.getString(any(), any()) } returns "device-123"
+    // Build.MANUFACTURER/MODEL are non-null on a real device but null under the mockable
+    // android.jar; DeviceInfo's constructor requires non-null Strings, so without this the call
+    // throws NullPointerException before ever reaching the network. See setStaticField's doc.
+    AbsTestEnvironment.setStaticField(android.os.Build::class.java, "MANUFACTURER", "TestManufacturer")
+    AbsTestEnvironment.setStaticField(android.os.Build::class.java, "MODEL", "TestModel")
+    try {
+      val session = playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = 5.0)
+      server.enqueue(
+              MockResponse().setBody(
+                      """{"results":[{"id":"${session.id}","success":true,"progressSynced":true,"error":null}]}"""
+              )
+      )
+
+      val latch = CountDownLatch(1)
+      var success: Boolean? = null
+      handler.sendSyncLocalSessions(listOf(session)) { ok, _ ->
+        success = ok
+        latch.countDown()
+      }
+      assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+      val request = takeRequest()
+      assertEquals("POST", request.method)
+      assertEquals("/api/session/local-all", request.path)
+      val body = request.body.readUtf8()
+      assertTrue(body.contains("\"sessions\""))
+      assertTrue(body.contains("\"deviceInfo\""))
+      assertEquals(true, success)
+    } finally {
+      unmockkStatic(android.provider.Settings.Secure::class)
+    }
+  }
+
+  @Test
+  fun `syncLocalMediaProgressForUser calls back immediately when there is no local progress to sync`() {
+    val latch = CountDownLatch(1)
+
+    handler.syncLocalMediaProgressForUser { latch.countDown() }
+
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+    assertEquals(0, server.requestCount)
+  }
+
+  @Test
+  fun `syncLocalMediaProgressForUser updates local progress when the server copy is newer`() {
+    val db = DbManager()
+    db.saveLocalMediaProgress(
+            LocalMediaProgress(
+                    "local-1", "local-item", null, 100.0, 0.1, 10.0, false, null, null,
+                    1_000L, 0L, null, "test-server", server.url("/").toString().trimEnd('/'),
+                    "test-user", "item-1", null
+            )
+    )
+    server.enqueue(
+            MockResponse().setBody(
+                    """{"id":"u1","username":"jane","mediaProgress":[{"id":"mp1","libraryItemId":"item-1","episodeId":null,"duration":100.0,"progress":0.8,"currentTime":80.0,"isFinished":false,"ebookLocation":null,"ebookProgress":null,"lastUpdate":5000,"startedAt":0,"finishedAt":null}]}"""
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    handler.syncLocalMediaProgressForUser { latch.countDown() }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    val updated = db.getLocalMediaProgress("local-1")
+    assertEquals(80.0, updated?.currentTime ?: -1.0, 0.0)
+    assertEquals(5_000L, updated?.lastUpdate)
+  }
+
+  @Test
+  fun `syncLocalMediaProgressForUser patches the server when local ebook progress is newer`() {
+    val db = DbManager()
+    db.saveLocalMediaProgress(
+            LocalMediaProgress(
+                    "local-1", "local-item", null, 100.0, 0.1, 10.0, false, "cfi-local", 0.3,
+                    9_999L, 0L, null, "test-server", server.url("/").toString().trimEnd('/'),
+                    "test-user", "item-1", null
+            )
+    )
+    server.enqueue(
+            MockResponse().setBody(
+                    """{"id":"u1","username":"jane","mediaProgress":[{"id":"mp1","libraryItemId":"item-1","episodeId":null,"duration":100.0,"progress":0.1,"currentTime":10.0,"isFinished":false,"ebookLocation":"cfi-server","ebookProgress":0.2,"lastUpdate":1000,"startedAt":0,"finishedAt":null}]}"""
+            )
+    )
+    server.enqueue(MockResponse().setBody("""{}""")) // response to the follow-up PATCH
+
+    val latch = CountDownLatch(1)
+    handler.syncLocalMediaProgressForUser { latch.countDown() }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    takeRequest() // GET /api/me
+    val patchRequest = takeRequest()
+    assertEquals("PATCH", patchRequest.method)
+    assertEquals("/api/me/progress/item-1", patchRequest.path)
+    assertTrue(patchRequest.body.readUtf8().contains("cfi-local"))
   }
 
   private fun minimalLibraryItemJson(id: String, collapsedSeries: Boolean = false): String {

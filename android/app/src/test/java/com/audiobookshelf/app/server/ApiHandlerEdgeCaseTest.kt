@@ -43,6 +43,9 @@ class ApiHandlerEdgeCaseTest {
   @After
   fun tearDown() {
     server.shutdown()
+    // Otherwise DeviceManager.serverConnectionConfig keeps pointing at this now-shut-down
+    // MockWebServer instance for whichever test class the shared JVM runs next.
+    AbsTestEnvironment.reset()
   }
 
   private fun getCurrentUserOnce(): Pair<User?, Int> {

@@ -2,6 +2,10 @@ package com.audiobookshelf.app.device
 
 import com.audiobookshelf.app.data.ServerConnectionConfig
 import com.audiobookshelf.app.support.AbsTestEnvironment
+import io.mockk.every
+import io.mockk.mockkStatic
+import io.mockk.slot
+import io.mockk.unmockkStatic
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -89,5 +93,25 @@ class DeviceManagerVersionTest {
     assertEquals(config, DeviceManager.getServerConnectionConfig("one"))
     assertNull(DeviceManager.getServerConnectionConfig("missing"))
     assertNull(DeviceManager.getServerConnectionConfig(null))
+  }
+
+  @Test
+  fun `getBase64Id encodes the id bytes with the URL_SAFE and NO_WRAP flags`() {
+    // android.util.Base64 has no working implementation under the mockable android.jar (see
+    // ApiHandlerContractTest's Base64 delegation), so this locks in the *contract* - which bytes
+    // and which flags get passed - rather than the actual encoded output.
+    mockkStatic(android.util.Base64::class)
+    val capturedBytes = slot<ByteArray>()
+    val capturedFlags = slot<Int>()
+    every { android.util.Base64.encodeToString(capture(capturedBytes), capture(capturedFlags)) } returns "encoded"
+    try {
+      val result = DeviceManager.getBase64Id("my-id")
+
+      assertEquals("encoded", result)
+      assertEquals("my-id", String(capturedBytes.captured))
+      assertEquals(android.util.Base64.URL_SAFE or android.util.Base64.NO_WRAP, capturedFlags.captured)
+    } finally {
+      unmockkStatic(android.util.Base64::class)
+    }
   }
 }

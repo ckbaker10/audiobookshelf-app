@@ -162,6 +162,31 @@ class InternalDownloadManagerTest {
     assertFalse(request.path.orEmpty().contains("token"))
   }
 
+  @Test
+  fun `download has no mechanism to carry a server's configured custom headers`() {
+    // ServerConnectionConfig.customHeaders exists specifically so users can configure headers a
+    // reverse proxy in front of their server requires (see AbsDatabase's ServerConnConfigPayload,
+    // and the equivalent ApiHandler gap already covered in ApiHandlerEdgeCaseTest). The gap is
+    // worse here than in ApiHandler: DownloadItemManager.startDownload already resolves the
+    // active ServerConnectionConfig (`activeConfig`) to pull the auth `token` before calling
+    // `.download(serverUrl(item, part), token)`, but never reads `activeConfig.customHeaders` from
+    // that same object to forward it - `download(url, token)`'s signature has no parameter for
+    // extra headers at all, so there is no way for a caller to supply them even if it tried. Every
+    // app-managed download for a server behind a header-requiring proxy is silently sent without
+    // it. This is a request-shape gap (the header is simply never asked for), not a wrong value,
+    // so it's characterized here as the exact fixed header set `download()` is capable of sending.
+    server.enqueue(MockResponse().setBody("abcd"))
+    val callback = download(File(downloadDirectory, "book.part"), expectedSize = 4)
+
+    callback.awaitCompletion()
+    val request = server.takeRequest()
+
+    assertEquals(
+            setOf("Accept-Encoding", "Authorization", "Host", "Connection", "User-Agent"),
+            request.headers.names()
+    )
+  }
+
   private fun download(
           destination: File,
           expectedSize: Long,
