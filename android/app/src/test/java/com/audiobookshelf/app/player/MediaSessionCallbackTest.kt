@@ -10,6 +10,7 @@ import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import org.junit.After
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -36,6 +37,11 @@ class MediaSessionCallbackTest {
     AbsTestEnvironment.reset()
     pns = mockk(relaxed = true)
     callback = MediaSessionCallback(pns)
+  }
+
+  @After
+  fun tearDown() {
+    AbsTestEnvironment.reset()
   }
 
   @Test

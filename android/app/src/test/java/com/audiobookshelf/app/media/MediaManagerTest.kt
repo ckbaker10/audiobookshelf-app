@@ -1,6 +1,9 @@
 package com.audiobookshelf.app.media
 
+import android.support.v4.media.MediaBrowserCompat
+import com.audiobookshelf.app.data.Library
 import com.audiobookshelf.app.data.LibraryItem
+import com.audiobookshelf.app.data.LibraryStats
 import com.audiobookshelf.app.data.LocalLibraryItem
 import com.audiobookshelf.app.data.Podcast
 import com.audiobookshelf.app.data.PodcastEpisode
@@ -11,6 +14,10 @@ import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.support.AbsTestEnvironment
+import io.mockk.every
+import io.mockk.mockk
+import io.mockk.mockkStatic
+import java.util.Date
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
@@ -32,6 +39,11 @@ class MediaManagerTest {
   @Before
   fun setUp() {
     AbsTestEnvironment.reset()
+    // loadAuthorBooksWithAudio/loadAuthorSeriesBooksWithAudio/loadPodcastEpisodeMediaBrowserItems
+    // (added below) transitively need Base64.encodeToString (ApiHandler's author/series filter
+    // query params) and Uri.parse (cover URI resolution), both null-stubbed by the mockable
+    // android.jar - see kotlin-android-coverage-audit-pass-4.md's getBase64Id finding.
+    AbsTestEnvironment.mockLocalFileStatics()
     server = MockWebServer()
     server.start()
     DeviceManager.serverConnectionConfig =
@@ -45,6 +57,7 @@ class MediaManagerTest {
   @After
   fun tearDown() {
     server.shutdown()
+    io.mockk.unmockkAll()
   }
 
   @Test
@@ -429,17 +442,271 @@ class MediaManagerTest {
   }
 
   private fun minimalLibraryItemJson(id: String, title: String): String {
+    return libraryItemJson(id, title, hasTracks = true)
+  }
+
+  private fun libraryItemJson(id: String, title: String, authorName: String? = null, hasTracks: Boolean = true): String {
+    val tracks =
+            if (hasTracks)
+                    """[{"index":0,"startOffset":0.0,"duration":10.0,"title":"Track 1","contentUrl":"/track","mimeType":null,"metadata":null,"isLocal":false,"localFileId":null,"serverIndex":0}]"""
+            else "[]"
+    val authorNameJson = if (authorName != null) "\"$authorName\"" else "null"
     return """
       {
         "id": "$id", "ino": "ino", "libraryId": "lib-1", "folderId": "folder",
         "path": "/book", "relPath": "book", "mtimeMs": 0, "ctimeMs": 0, "birthtimeMs": 0,
         "addedAt": 0, "updatedAt": 0, "isMissing": false, "isInvalid": false, "mediaType": "book",
         "media": {
-          "metadata": {"title": "$title", "genres": [], "explicit": false, "subtitle": null},
+          "metadata": {"title": "$title", "genres": [], "explicit": false, "subtitle": null, "authorName": $authorNameJson},
           "coverPath": null, "tags": [],
-          "tracks": [{"index":0,"startOffset":0.0,"duration":10.0,"title":"Track 1","contentUrl":"/track","mimeType":null,"metadata":null,"isLocal":false,"localFileId":null,"serverIndex":0}]
+          "tracks": $tracks
         }
       }
     """.trimIndent()
+  }
+
+  private fun podcastEpisodeJson(id: String, title: String, publishedAt: Long?) =
+          """
+      {
+        "id": "$id", "index": 1, "episode": null, "episodeType": null, "title": "$title",
+        "subtitle": null, "description": null, "pubDate": null, "publishedAt": $publishedAt,
+        "audioFile": null,
+        "audioTrack": {"index":0,"startOffset":0.0,"duration":10.0,"title":"$title","contentUrl":"/ep","mimeType":null,"metadata":null,"isLocal":false,"localFileId":null,"serverIndex":0},
+        "chapters": null, "duration": 10.0, "size": null, "serverEpisodeId": null, "localEpisodeId": null
+      }
+    """.trimIndent()
+
+  private fun podcastLibraryItemJson(id: String, episodesJson: String): String {
+    return """
+      {
+        "id": "$id", "ino": "ino", "libraryId": "lib-1", "folderId": "folder",
+        "path": "/cast", "relPath": "cast", "mtimeMs": 0, "ctimeMs": 0, "birthtimeMs": 0,
+        "addedAt": 0, "updatedAt": 0, "isMissing": false, "isInvalid": false, "mediaType": "podcast",
+        "media": {
+          "metadata": {"title": "Cast", "author": null, "feedUrl": null, "genres": [], "explicit": false},
+          "coverPath": null, "tags": [], "episodes": $episodesJson, "autoDownloadEpisodes": false, "numEpisodes": 0
+        }
+      }
+    """.trimIndent()
+  }
+
+  @Test
+  fun `loadAuthorBooksWithAudio filters to items with audio and caches the result`() {
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put(
+                              "results",
+                              JSONArray()
+                                      .put(JSONObject(libraryItemJson("book-1", "With Audio", hasTracks = true)))
+                                      .put(JSONObject(libraryItemJson("book-2", "No Audio", hasTracks = false)))
+                      )
+                    }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<LibraryItem>? = null
+    mediaManager.loadAuthorBooksWithAudio("lib-1", "author-1") {
+      result = it
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+    assertEquals(listOf("book-1"), result?.map { it.id })
+
+    // A second call for the same author must be served from cache, not a second request.
+    val cachedLatch = CountDownLatch(1)
+    mediaManager.loadAuthorBooksWithAudio("lib-1", "author-1") { cachedLatch.countDown() }
+    assertTrue(cachedLatch.await(5, TimeUnit.SECONDS))
+    assertEquals(1, server.requestCount)
+  }
+
+  @Test
+  fun `loadAuthorSeriesBooksWithAudio filters results down to books by the cached author`() {
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put(
+                              "authors",
+                              JSONArray().put(JSONObject(authorJson("author-1", "Jane Doe", numBooks = 1)))
+                      )
+                    }.toString()
+            )
+    )
+    val authorsLatch = CountDownLatch(1)
+    mediaManager.loadAuthorsWithBooks("lib-1") { authorsLatch.countDown() }
+    assertTrue(authorsLatch.await(5, TimeUnit.SECONDS))
+
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put(
+                              "results",
+                              JSONArray()
+                                      .put(JSONObject(libraryItemJson("book-1", "By Jane", authorName = "Jane Doe")))
+                                      .put(JSONObject(libraryItemJson("book-2", "By Someone Else", authorName = "Someone Else")))
+                      )
+                    }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<LibraryItem>? = null
+    mediaManager.loadAuthorSeriesBooksWithAudio("lib-1", "author-1", "series-1") {
+      result = it
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    assertEquals(listOf("book-1"), result?.map { it.id })
+  }
+
+  @Test
+  fun `loadAuthorSeriesBooksWithAudio caches under a key its own lookup never reads, so every call re-fetches`() {
+    // Newly discovered defect: the cache read checks "authorId|seriesId" but the write a few
+    // lines later stores under plain authorId - so the read key never matches anything the method
+    // itself ever wrote, and every call is a guaranteed cache miss. This asserts the intended
+    // contract (a second identical call is served from cache) and currently fails.
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put("authors", JSONArray().put(JSONObject(authorJson("author-1", "Jane Doe", numBooks = 1))))
+                    }.toString()
+            )
+    )
+    val authorsLatch = CountDownLatch(1)
+    mediaManager.loadAuthorsWithBooks("lib-1") { authorsLatch.countDown() }
+    assertTrue(authorsLatch.await(5, TimeUnit.SECONDS))
+
+    val itemsJson =
+            JSONObject().apply {
+              put("results", JSONArray().put(JSONObject(libraryItemJson("book-1", "By Jane", authorName = "Jane Doe"))))
+            }.toString()
+    server.enqueue(MockResponse().setBody(itemsJson))
+    server.enqueue(MockResponse().setBody(itemsJson))
+
+    val firstLatch = CountDownLatch(1)
+    mediaManager.loadAuthorSeriesBooksWithAudio("lib-1", "author-1", "series-1") { firstLatch.countDown() }
+    assertTrue(firstLatch.await(5, TimeUnit.SECONDS))
+
+    val secondLatch = CountDownLatch(1)
+    mediaManager.loadAuthorSeriesBooksWithAudio("lib-1", "author-1", "series-1") { secondLatch.countDown() }
+    assertTrue(secondLatch.await(5, TimeUnit.SECONDS))
+
+    assertEquals("a repeat call for the same author+series should be served from cache", 1, server.requestCount)
+  }
+
+  /**
+   * `PodcastEpisode.getMediaDescription` calls `android.icu.text.DateFormat.getDateInstance()`
+   * when `publishedAt` is non-null - a static factory method that returns `null` under the
+   * mockable `android.jar` (same class of gap as `Base64.encodeToString`/`MimeTypeMap
+   * .getSingleton()`), so `sdf.format(...)` NPEs immediately after. This is a test-environment
+   * gap, not a production bug - `getDateInstance()` returns a real formatter on-device.
+   */
+  private fun mockDateFormat() {
+    mockkStatic(android.icu.text.DateFormat::class)
+    val formatter = mockk<android.icu.text.DateFormat>()
+    every { formatter.format(any<Date>()) } returns "Jan 1, 2024"
+    every { android.icu.text.DateFormat.getDateInstance() } returns formatter
+  }
+
+  @Test
+  fun `loadPodcastEpisodeMediaBrowserItems returns server episodes as playable media items sorted newest first`() {
+    mockDateFormat()
+    val episodesJson =
+            JSONArray()
+                    .put(JSONObject(podcastEpisodeJson("ep-old", "Old Episode", publishedAt = 1_000L)))
+                    .put(JSONObject(podcastEpisodeJson("ep-new", "New Episode", publishedAt = 2_000L)))
+    server.enqueue(MockResponse().setBody(podcastLibraryItemJson("cast-1", episodesJson.toString())))
+
+    val latch = CountDownLatch(1)
+    var result: MutableList<MediaBrowserCompat.MediaItem>? = null
+    mediaManager.loadPodcastEpisodeMediaBrowserItems("cast-1", AbsTestEnvironment.mockContext()) {
+      result = it
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    assertEquals(2, result?.size)
+    assertEquals("New Episode", result?.get(0)?.description?.title)
+    assertEquals("Old Episode", result?.get(1)?.description?.title)
+  }
+
+  @Test
+  fun `loadPodcastEpisodeMediaBrowserItems returns an empty list for a podcast with no episodes`() {
+    server.enqueue(MockResponse().setBody(podcastLibraryItemJson("cast-1", "[]")))
+
+    val latch = CountDownLatch(1)
+    var result: MutableList<MediaBrowserCompat.MediaItem>? = null
+    mediaManager.loadPodcastEpisodeMediaBrowserItems("cast-1", AbsTestEnvironment.mockContext()) {
+      result = it
+      latch.countDown()
+    }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    assertTrue(result!!.isEmpty())
+  }
+
+  @Test
+  fun `populatePersonalizedDataForAllLibraries routes book discover items into the discovery cache`() {
+    mediaManager.serverLibraries = listOf(Library("lib-1", "Lib", mutableListOf(), "database", "book", LibraryStats(0, 0, 0.0, 1)))
+    val shelvesJson =
+            JSONArray()
+                    .put(
+                            JSONObject().apply {
+                              put("id", "continue-listening"); put("label", "Continue"); put("total", 0); put("type", "book")
+                              put("entities", JSONArray())
+                            }
+                    )
+                    .put(
+                            JSONObject().apply {
+                              put("id", "discover"); put("label", "Discover"); put("total", 1); put("type", "book")
+                              put("entities", JSONArray().put(JSONObject(libraryItemJson("book-1", "Discovered"))))
+                            }
+                    )
+    server.enqueue(MockResponse().setBody(JSONObject().apply { put("value", shelvesJson) }.toString()))
+
+    val latch = CountDownLatch(1)
+    mediaManager.populatePersonalizedDataForAllLibraries { latch.countDown() }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    val discoveryLatch = CountDownLatch(1)
+    var discovered: List<LibraryItem>? = null
+    mediaManager.loadLibraryDiscoveryBooksWithAudio("lib-1") {
+      discovered = it
+      discoveryLatch.countDown()
+    }
+    assertTrue(discoveryLatch.await(5, TimeUnit.SECONDS))
+    assertEquals(
+            "the continue-listening shelf must be excluded and only discover entities cached",
+            listOf("book-1"),
+            discovered?.map { it.id }
+    )
+  }
+
+  @Test
+  fun `populatePersonalizedDataForAllLibraries routes a recent-series shelf into the recent-shelves cache`() {
+    mediaManager.serverLibraries = listOf(Library("lib-1", "Lib", mutableListOf(), "database", "book", LibraryStats(0, 0, 0.0, 1)))
+    val shelvesJson =
+            JSONArray().put(
+                    JSONObject().apply {
+                      put("id", "recent-series"); put("label", "Recent Series"); put("total", 0); put("type", "series")
+                      put("entities", JSONArray())
+                    }
+            )
+    server.enqueue(MockResponse().setBody(JSONObject().apply { put("value", shelvesJson) }.toString()))
+
+    val latch = CountDownLatch(1)
+    mediaManager.populatePersonalizedDataForAllLibraries { latch.countDown() }
+    assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+    val shelfLatch = CountDownLatch(1)
+    var shelf: com.audiobookshelf.app.data.LibraryShelfType? = null
+    mediaManager.getLibraryRecentShelfByType("lib-1", "series") {
+      shelf = it
+      shelfLatch.countDown()
+    }
+    assertTrue(shelfLatch.await(5, TimeUnit.SECONDS))
+    assertEquals("recent-series", shelf?.id)
   }
 }

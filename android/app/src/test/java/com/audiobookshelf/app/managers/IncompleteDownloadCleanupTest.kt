@@ -103,6 +103,36 @@ class IncompleteDownloadCleanupTest {
     assertEquals(1, db.getDownloadItems().size)
   }
 
+  private val retentionMs = 24L * 60L * 60L * 1000L
+
+  @Test
+  fun `an item just inside the 24-hour retention window is retained`() {
+    // A few seconds of slack rather than a literal 1ms margin: `now` is re-read inside
+    // cleanupExpired, strictly after this line runs, so a true 1ms-from-the-boundary failedAt
+    // would flake under real (non-zero) test execution time.
+    val justInside = System.currentTimeMillis() - retentionMs + 5_000L
+    db.saveDownloadItem(
+            downloadItem("item-1", terminalFailureAt = justInside, part(stagingFile("a.mp3").absolutePath, failed = true))
+    )
+
+    IncompleteDownloadCleanup.cleanupExpired(context)
+
+    assertEquals(1, db.getDownloadItems().size)
+  }
+
+  @Test
+  fun `an item exactly 24 hours old is deleted`() {
+    val exactlyAtBoundary = System.currentTimeMillis() - retentionMs
+    val staging = stagingFile("a.mp3")
+    db.saveDownloadItem(
+            downloadItem("item-1", terminalFailureAt = exactlyAtBoundary, part(staging.absolutePath, failed = true))
+    )
+
+    IncompleteDownloadCleanup.cleanupExpired(context)
+
+    assertTrue(db.getDownloadItems().isEmpty())
+  }
+
   @Test
   fun `an old terminally-failed item with all parts failed is deleted and its staging file removed`() {
     val oldFailure = System.currentTimeMillis() - (25L * 60L * 60L * 1000L)

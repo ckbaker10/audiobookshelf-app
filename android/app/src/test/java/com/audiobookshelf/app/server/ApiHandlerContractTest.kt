@@ -498,34 +498,37 @@ class ApiHandlerContractTest {
   fun `sendSyncLocalSessions posts partial sessions and device info to the local-all endpoint`() {
     mockkStatic(android.provider.Settings.Secure::class)
     every { android.provider.Settings.Secure.getString(any(), any()) } returns "device-123"
-    // Build.MANUFACTURER/MODEL are non-null on a real device but null under the mockable
-    // android.jar; DeviceInfo's constructor requires non-null Strings, so without this the call
-    // throws NullPointerException before ever reaching the network. See setStaticField's doc.
-    AbsTestEnvironment.setStaticField(android.os.Build::class.java, "MANUFACTURER", "TestManufacturer")
-    AbsTestEnvironment.setStaticField(android.os.Build::class.java, "MODEL", "TestModel")
     try {
-      val session = playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = 5.0)
-      server.enqueue(
-              MockResponse().setBody(
-                      """{"results":[{"id":"${session.id}","success":true,"progressSynced":true,"error":null}]}"""
-              )
-      )
+      // Build.MANUFACTURER/MODEL are non-null on a real device but null under the mockable
+      // android.jar; DeviceInfo's constructor requires non-null Strings, so without this the call
+      // throws NullPointerException before ever reaching the network. withStaticField restores
+      // the original (null) value afterward instead of leaking it into later test classes.
+      AbsTestEnvironment.withStaticField(android.os.Build::class.java, "MANUFACTURER", "TestManufacturer") {
+        AbsTestEnvironment.withStaticField(android.os.Build::class.java, "MODEL", "TestModel") {
+          val session = playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = 5.0)
+          server.enqueue(
+                  MockResponse().setBody(
+                          """{"results":[{"id":"${session.id}","success":true,"progressSynced":true,"error":null}]}"""
+                  )
+          )
 
-      val latch = CountDownLatch(1)
-      var success: Boolean? = null
-      handler.sendSyncLocalSessions(listOf(session)) { ok, _ ->
-        success = ok
-        latch.countDown()
+          val latch = CountDownLatch(1)
+          var success: Boolean? = null
+          handler.sendSyncLocalSessions(listOf(session)) { ok, _ ->
+            success = ok
+            latch.countDown()
+          }
+          assertTrue(latch.await(5, TimeUnit.SECONDS))
+
+          val request = takeRequest()
+          assertEquals("POST", request.method)
+          assertEquals("/api/session/local-all", request.path)
+          val body = request.body.readUtf8()
+          assertTrue(body.contains("\"sessions\""))
+          assertTrue(body.contains("\"deviceInfo\""))
+          assertEquals(true, success)
+        }
       }
-      assertTrue(latch.await(5, TimeUnit.SECONDS))
-
-      val request = takeRequest()
-      assertEquals("POST", request.method)
-      assertEquals("/api/session/local-all", request.path)
-      val body = request.body.readUtf8()
-      assertTrue(body.contains("\"sessions\""))
-      assertTrue(body.contains("\"deviceInfo\""))
-      assertEquals(true, success)
     } finally {
       unmockkStatic(android.provider.Settings.Secure::class)
     }
