@@ -1,0 +1,192 @@
+package com.audiobookshelf.app.device
+
+import android.content.Context
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import com.audiobookshelf.app.support.AbsTestEnvironment
+import io.mockk.every
+import io.mockk.mockk
+import org.junit.After
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Before
+import org.junit.Test
+
+/**
+ * Connection classification - `github-open-issues-test-coverage-candidates.md` Priority A row 4:
+ * [#1702](https://github.com/advplyr/audiobookshelf-app/issues/1702),
+ * [#1560](https://github.com/advplyr/audiobookshelf-app/issues/1560),
+ * [#1802](https://github.com/advplyr/audiobookshelf-app/issues/1802). Reported contract:
+ *
+ * > *VPN or a temporary connection loss must not be mistaken for permanent offline state, crash the
+ * > app, or strand an unfinished operation.*
+ *
+ * `DeviceManager.checkConnectivity` is the whole of that decision. Everything downstream - whether
+ * `MediaProgressSyncer.sync` contacts the server at all (`MediaProgressSyncer.kt:249`), whether
+ * `PlayerNotificationService` treats the session as offline - is a consequence of the single
+ * boolean it returns, so this is the seam the cluster names.
+ *
+ * The `TRANSPORT_*` and `NET_CAPABILITY_*` values are `public static final int` compile-time
+ * constants, so they inline correctly on both sides and are safe here - unlike `Build.VERSION
+ * .SDK_INT`, which is a real field read and returns `0` under the mockable `android.jar`.
+ */
+class ConnectivityClassificationTest {
+  private lateinit var ctx: Context
+  private lateinit var connectivityManager: ConnectivityManager
+  private lateinit var capabilities: NetworkCapabilities
+
+  @Before
+  fun setUp() {
+    AbsTestEnvironment.reset()
+    ctx = mockk(relaxed = true)
+    connectivityManager = mockk(relaxed = true)
+    capabilities = mockk(relaxed = true)
+    every { ctx.getSystemService(Context.CONNECTIVITY_SERVICE) } returns connectivityManager
+    every { connectivityManager.activeNetwork } returns mockk<Network>(relaxed = true)
+    every { connectivityManager.getNetworkCapabilities(any()) } returns capabilities
+    every { capabilities.hasTransport(any()) } returns false
+    every { capabilities.hasCapability(any()) } returns false
+  }
+
+  @After
+  fun tearDown() {
+    AbsTestEnvironment.reset()
+  }
+
+  private fun withTransport(transport: Int) {
+    every { capabilities.hasTransport(transport) } returns true
+  }
+
+  private fun withCapability(capability: Int) {
+    every { capabilities.hasCapability(capability) } returns true
+  }
+
+  // --- The three transports production recognises ---------------------------------------------
+
+  @Test
+  fun `cellular counts as connected`() {
+    withTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+
+    assertTrue(DeviceManager.checkConnectivity(ctx))
+  }
+
+  @Test
+  fun `wifi counts as connected`() {
+    withTransport(NetworkCapabilities.TRANSPORT_WIFI)
+
+    assertTrue(DeviceManager.checkConnectivity(ctx))
+  }
+
+  @Test
+  fun `ethernet counts as connected`() {
+    withTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+
+    assertTrue(DeviceManager.checkConnectivity(ctx))
+  }
+
+  // --- Genuinely offline states ---------------------------------------------------------------
+
+  @Test
+  fun `no active network is offline`() {
+    every { connectivityManager.getNetworkCapabilities(any()) } returns null
+
+    assertFalse(DeviceManager.checkConnectivity(ctx))
+  }
+
+  @Test
+  fun `a network with no recognised transport is offline`() {
+    // Every hasTransport stub returns false - the airplane-mode / no-network shape.
+    assertFalse(DeviceManager.checkConnectivity(ctx))
+  }
+
+  @Test
+  fun `bluetooth tethering alone is not treated as connected`() {
+    // Characterization: TRANSPORT_BLUETOOTH is not in production's list. Reverse-tethering over
+    // Bluetooth is rare enough that excluding it is defensible; recorded so it is a decision.
+    withTransport(NetworkCapabilities.TRANSPORT_BLUETOOTH)
+
+    assertFalse(DeviceManager.checkConnectivity(ctx))
+  }
+
+  // --- The reported defects --------------------------------------------------------------------
+
+  /**
+   * #1702's shape.
+   *
+   * Inputs: the active network is a VPN whose underlying transport is not reported on the VPN
+   * network object - the state on devices where the VPN interface is the active network and
+   * `NetworkCapabilities` carries `TRANSPORT_VPN` plus `NET_CAPABILITY_INTERNET` only.
+   *
+   * Expected: connected. A VPN that has internet is not offline; treating it as offline is exactly
+   * "a VPN mistaken for permanent offline state".
+   *
+   * Observed: `false`. `checkConnectivity` tests only `TRANSPORT_CELLULAR`, `TRANSPORT_WIFI` and
+   * `TRANSPORT_ETHERNET` (`DeviceManager.kt:160-169`) and returns `false` for anything else, so
+   * every server sync is skipped and the app behaves as if there were no network at all.
+   */
+  @Test
+  fun `a VPN network that has internet must not be classified as offline`() {
+    withTransport(NetworkCapabilities.TRANSPORT_VPN)
+    withCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    withCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+    assertTrue(
+            "a validated VPN with internet is a working connection, not an offline state",
+            DeviceManager.checkConnectivity(ctx)
+    )
+  }
+
+  /**
+   * The converse error, and the issue doc's own first named case for this cluster: *"transport
+   * available but internet probe fails"*.
+   *
+   * Inputs: Wi-Fi is associated but the network has neither `NET_CAPABILITY_INTERNET` nor
+   * `NET_CAPABILITY_VALIDATED` - a captive portal (hotel, airport, corporate guest Wi-Fi), or a
+   * router that is up while its uplink is down.
+   *
+   * Expected: not connected, so the caller keeps working offline rather than issuing requests that
+   * will hang or be answered by the portal's login page.
+   *
+   * Observed: `true`. Only the transport is inspected; `hasCapability` is never called
+   * (`DeviceManager.kt:158-170`). Requests then go to the portal, and #1560's report of the app
+   * stranding an unfinished operation follows from waiting on responses that never come.
+   */
+  @Test
+  fun `wifi with no validated internet must not be classified as connected`() {
+    withTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    // Deliberately no NET_CAPABILITY_INTERNET and no NET_CAPABILITY_VALIDATED.
+
+    assertFalse(
+            "an associated-but-unvalidated network is a captive portal, not a usable connection",
+            DeviceManager.checkConnectivity(ctx)
+    )
+  }
+
+  /**
+   * Characterization of the crash surface #1560 describes. `checkConnectivity` opens with an
+   * unchecked `as ConnectivityManager` cast (`DeviceManager.kt:157`). `getSystemService` is
+   * documented to return null when the service is unavailable - which happens while a `Context` is
+   * being torn down, the state a backgrounded media service is in when the system reclaims it.
+   *
+   * Recorded rather than asserted as a contract: on a real device the cast failing is a genuine
+   * programming error, so "must not throw" is arguable. What is not arguable is that callers such
+   * as `MediaProgressSyncer.sync` do not catch it, so it propagates out of a progress save.
+   */
+  @Test
+  fun `a context with no connectivity service throws out of the connectivity check`() {
+    every { ctx.getSystemService(Context.CONNECTIVITY_SERVICE) } returns null
+
+    var thrown: Throwable? = null
+    try {
+      DeviceManager.checkConnectivity(ctx)
+    } catch (e: Throwable) {
+      thrown = e
+    }
+
+    assertTrue(
+            "expected the unchecked cast to fail loudly; got $thrown",
+            thrown is NullPointerException || thrown is ClassCastException
+    )
+  }
+}
