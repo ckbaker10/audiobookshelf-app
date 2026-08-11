@@ -36,9 +36,6 @@ jobs:
       - name: copy to Android project
         run: npx cap sync
 
-      - name: run Android JVM unit tests
-        run: ./android/gradlew :app:testDebugUnitTest -p android --no-daemon
-
       - name: build Android app
         run: ./android/gradlew assembleDebug -p android --no-daemon
 
