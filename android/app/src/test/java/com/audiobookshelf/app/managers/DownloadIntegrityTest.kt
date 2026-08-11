@@ -19,7 +19,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Download integrity - the download-integrity issue cluster (see `TESTING.md` §11):
+ * Download integrity - the download-integrity issue cluster (see `TESTING.md` §10):
  * [#1838](https://github.com/advplyr/audiobookshelf-app/issues/1838),
  * [#1827](https://github.com/advplyr/audiobookshelf-app/issues/1827),
  * [#1709](https://github.com/advplyr/audiobookshelf-app/issues/1709),

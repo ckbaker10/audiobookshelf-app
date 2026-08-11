@@ -14,7 +14,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Connection classification - the connectivity-state issue cluster (see `TESTING.md` §11):
+ * Connection classification - the connectivity-state issue cluster (see `TESTING.md` §10):
  * [#1702](https://github.com/advplyr/audiobookshelf-app/issues/1702),
  * [#1560](https://github.com/advplyr/audiobookshelf-app/issues/1560),
  * [#1802](https://github.com/advplyr/audiobookshelf-app/issues/1802). Reported contract:

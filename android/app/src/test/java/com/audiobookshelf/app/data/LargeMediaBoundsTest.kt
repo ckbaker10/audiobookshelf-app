@@ -9,7 +9,7 @@ import org.junit.Test
 
 /**
  * Bounds and volume behaviour for `Podcast` and `PlaybackSession`, from
- * the large/invalid-media issue cluster (see `TESTING.md` §11) -
+ * the large/invalid-media issue cluster (see `TESTING.md` §10) -
  * [#1684](https://github.com/advplyr/audiobookshelf-app/issues/1684),
  * [#1650](https://github.com/advplyr/audiobookshelf-app/issues/1650),
  * [#1731](https://github.com/advplyr/audiobookshelf-app/issues/1731). Reported contract:

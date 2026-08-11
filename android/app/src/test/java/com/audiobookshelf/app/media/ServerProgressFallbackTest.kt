@@ -23,15 +23,13 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The `fix-progress-save-error` drift (see `TESTING.md` §11).
+ * Offline and failed-sync recovery for a **server-hosted** item, as opposed to a downloaded one.
  *
- * That review recorded: *"Master persists the playback session but does not create/update a
- * `LocalMediaProgress` fallback for server media in either failure path"* - offline, or a server
- * sync that fails - and marked it a "candidate for a focused port" with no test behind the claim.
- * This class is that test. It pins what master actually does in both failure paths, so the port
- * decision rests on executed behaviour rather than on a reading of the diff.
+ * The question these answer: when a progress sync cannot reach the server, does the listening
+ * position survive, and in what form? The two media types take different branches, and the
+ * difference is easy to misread as data loss, so it is pinned here rather than left to inference.
  *
- * **What the tests establish.** Master's recovery for a server-hosted item is *queue-based*, not
+ * **What the tests establish.** Recovery for a server-hosted item is *queue-based*, not
  * *progress-based*: the `PlaybackSession` is written to Paper on every sync attempt
  * (`MediaProgressSyncer.kt:253`) and flushed later by
  * `AbsDatabase.syncLocalSessionsWithServer`. The position is therefore not lost, which is the
@@ -39,11 +37,10 @@ import org.junit.Test
  * until a successful reconnect. A downloaded (local) item takes a different branch and writes a
  * `LocalMediaProgress` immediately, so the two media types genuinely behave differently offline.
  *
- * That asymmetry is characterized here rather than asserted as a defect. The old branch's fallback
- * would make offline progress visible for server items too, which is a product decision about what
- * a not-yet-synced position should look like in the UI, not a correctness bug. What *is* asserted
- * as an invariant is that neither failure path may drop the queued session - that would be real
- * data loss, and it is the thing a future port must not break.
+ * That asymmetry is characterized here rather than asserted as a defect: whether an unsynced
+ * server-item position should be visible in the UI is a product decision, not a correctness bug.
+ * What *is* asserted as an invariant is that neither failure path may drop the queued session -
+ * that would be real data loss, and it is what any change here must not break.
  */
 class ServerProgressFallbackTest {
   private lateinit var pns: PlayerNotificationService
@@ -119,9 +116,8 @@ class ServerProgressFallbackTest {
 
   @Test
   fun `an offline server-item sync writes no local media progress`() {
-    // Characterization of the drift: this is exactly what fix-progress-save-error added and master
-    // does not have. The position is recoverable from the queued session above, but nothing
-    // surfaces it as progress until a reconnect.
+    // Characterization, not a defect spec: the position is recoverable from the queued session
+    // above, but nothing surfaces it as progress until a reconnect.
     syncOnce(serverSession(), currentTime = 250.0)
 
     assertTrue(db.getAllLocalMediaProgress().isEmpty())
@@ -151,7 +147,7 @@ class ServerProgressFallbackTest {
   // --- Server sync attempted and failed --------------------------------------------------------
 
   /**
-   * The invariant a future port must preserve. With a network present but the server unreachable
+   * The invariant any change here must preserve. With a network present but the server unreachable
    * (no listener on the configured address), `sendProgressSync` fails and
    * `MediaProgressSyncer.sync` leaves the session in the queue - it is only removed inside the
    * success branch (`MediaProgressSyncer.kt:308`).
@@ -178,7 +174,7 @@ class ServerProgressFallbackTest {
 
     syncOnce(serverSession(), currentTime = 420.0)
 
-    // The second half of the drift review's claim, now verified rather than inferred.
+    // The second half of the asymmetry: no fallback record is written on this path either.
     assertTrue(db.getAllLocalMediaProgress().isEmpty())
   }
 }

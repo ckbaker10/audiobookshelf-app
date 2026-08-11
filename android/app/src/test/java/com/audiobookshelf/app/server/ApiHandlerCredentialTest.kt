@@ -20,7 +20,7 @@ import org.junit.Test
 
 /**
  * Credential preservation across transient failures - the auth/transient-HTTP issue cluster
- * (see `TESTING.md` §11): [#1908](https://github.com/advplyr/audiobookshelf-app/issues/1908),
+ * (see `TESTING.md` §10): [#1908](https://github.com/advplyr/audiobookshelf-app/issues/1908),
  * [#1900](https://github.com/advplyr/audiobookshelf-app/issues/1900),
  * [#1901](https://github.com/advplyr/audiobookshelf-app/issues/1901). Reported contract:
  *

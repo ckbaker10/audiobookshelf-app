@@ -27,17 +27,13 @@ import org.junit.Test
  * App/server API contract - the request line the Android client actually emits for each call,
  * pinned against the route that serves it in the audiobookshelf **server** source.
  *
- * This is the drift check the drifted-branch review could not perform (see `TESTING.md` §11):
- * that review compared the app against its own old branches, but the contract that actually breaks
- * users is the one between this client and the server it talks to, and nothing in the suite
- * asserted a single request path. A renamed route, a changed verb, or a dropped path parameter currently produces a
- * runtime 404 that no test sees.
+ * Nothing else in this suite asserts a single request path, so a renamed route, a changed verb or a
+ * dropped path parameter produces a runtime 404 that no test sees.
  *
- * Every expectation below was verified against the server checked out at
- * `/home/lukas/repos/audiobookshelf` (`1b46d680`), and each test names the server file and line
- * that registers the route. Result of that comparison: **every endpoint this client calls exists on
- * the current server, with a matching verb** - there is no endpoint drift today. These tests exist
- * so that stays true, and so the next drift review has something executable to run.
+ * Every expectation below was checked by hand against the audiobookshelf server source, and each
+ * test names the route that serves it. At the time of writing, every endpoint this client calls
+ * exists on the server with a matching verb. These tests exist so that stays true, and so the check
+ * is executable rather than a manual diff.
  *
  * Scope: request shape only. Response parsing is covered by `ApiHandlerEdgeCaseTest`, and the
  * responses here are minimal stubs.

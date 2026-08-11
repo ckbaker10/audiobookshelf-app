@@ -48,7 +48,15 @@ package. Use JUnit 4, MockK, MockWebServer, and `kotlinx-coroutines-test` as nee
 Keep test inputs deterministic; do not depend on Android device services, sleeps, or
 external network access.
 
-Regression specifications for known `master` defects are normal, enabled tests.
-They are expected to make this characterization branch red while the defects remain
-in production. A candidate fix is successful only when its corresponding regression
-test changes from failing to passing without weakening the assertion.
+Regression specifications for known defects are normal, enabled tests, not `@Ignore`d
+ones. The suite is therefore expected to be red while those defects remain in
+production. A candidate fix is successful only when its corresponding regression test
+changes from failing to passing without weakening the assertion.
+
+## Before adding or changing tests
+
+Read `android/app/src/test/java/com/audiobookshelf/app/TESTING.md`. It documents the
+shared `AbsTestEnvironment` harness, which Android APIs are stubbed to null or no-ops
+under AGP's mockable `android.jar` (and so cannot be tested here), the current defect
+list, and the assertion mistakes that have produced misleading tests in this suite
+before.

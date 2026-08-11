@@ -22,7 +22,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Pause from an external control - the pause/external-control issue cluster (see `TESTING.md` §11): [#1847](https://github.com/advplyr/audiobookshelf-app/issues/1847),
+ * Pause from an external control - the pause/external-control issue cluster (see `TESTING.md` §10): [#1847](https://github.com/advplyr/audiobookshelf-app/issues/1847),
  * [#1828](https://github.com/advplyr/audiobookshelf-app/issues/1828),
  * [#1491](https://github.com/advplyr/audiobookshelf-app/issues/1491). Reported contract:
  *

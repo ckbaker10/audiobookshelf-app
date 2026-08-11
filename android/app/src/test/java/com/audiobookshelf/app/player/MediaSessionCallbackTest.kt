@@ -17,9 +17,9 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * `MediaSessionCallback` is the media-button / Android Auto / lock-screen command surface - the
- * `fix-telephone-pause` regression lives in `handleCallMediaButton` below. Every collaborator is
- * a relaxed mock of `PlayerNotificationService`, so these are interaction tests.
+ * `MediaSessionCallback` is the media-button / Android Auto / lock-screen command surface; the
+ * call-interruption path is `handleCallMediaButton` below. Every collaborator is a relaxed mock of
+ * `PlayerNotificationService`, so these are interaction tests.
  *
  * Deliberately NOT exercised: `KEYCODE_MEDIA_PLAY_PAUSE` (key down), `KEYCODE_HEADSETHOOK`,
  * `KEYCODE_MEDIA_PLAY`/`KEYCODE_MEDIA_PAUSE` (key up) - these route through
