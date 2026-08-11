@@ -42,7 +42,7 @@ class MediaManagerTest {
     // loadAuthorBooksWithAudio/loadAuthorSeriesBooksWithAudio/loadPodcastEpisodeMediaBrowserItems
     // (added below) transitively need Base64.encodeToString (ApiHandler's author/series filter
     // query params) and Uri.parse (cover URI resolution), both null-stubbed by the mockable
-    // android.jar - see kotlin-android-coverage-audit-pass-4.md's getBase64Id finding.
+    // android.jar - see TESTING.md §6 (the mockable-jar known-null list).
     AbsTestEnvironment.mockLocalFileStatics()
     server = MockWebServer()
     server.start()

@@ -27,10 +27,10 @@ import org.junit.Test
  * App/server API contract - the request line the Android client actually emits for each call,
  * pinned against the route that serves it in the audiobookshelf **server** source.
  *
- * This is the drift check `drifted-branch-regression-review.md` could not perform: the review
- * compared the app against its own old branches, but the contract that actually breaks users is the
- * one between this client and the server it talks to, and nothing in the suite asserted a single
- * request path. A renamed route, a changed verb, or a dropped path parameter currently produces a
+ * This is the drift check the drifted-branch review could not perform (see `TESTING.md` §11):
+ * that review compared the app against its own old branches, but the contract that actually breaks
+ * users is the one between this client and the server it talks to, and nothing in the suite
+ * asserted a single request path. A renamed route, a changed verb, or a dropped path parameter currently produces a
  * runtime 404 that no test sees.
  *
  * Every expectation below was verified against the server checked out at

@@ -38,7 +38,7 @@ import org.junit.Test
  * The practical consequence is a latent trap in `AbsDatabaseTest`, not in these tests: any future
  * addition there can silently make those two credential tests fail for a reason unrelated to the
  * change. Keeping this cluster separate avoids paying that cost now; the trap itself is reported in
- * the pass-6 results as its own finding.
+ * `TESTING.md` §6.1 as its own finding, with the full bisection.
  */
 class AbsDatabaseProgressConflictTest {
   private lateinit var db: DbManager

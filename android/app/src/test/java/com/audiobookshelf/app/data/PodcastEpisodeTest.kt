@@ -24,7 +24,7 @@ import org.junit.Test
  * `containsKey` all return their zero-value defaults regardless of what was put. A test asserting
  * `getInt(KEY) == expectedValue` would pass or fail based on whether `expectedValue` happens to be
  * the Kotlin/Java default (0/false), not on anything the method under test actually did - exactly
- * the false-green shape `kotlin-android-coverage-audit-pass-4.md`'s A1 finding warned about.
+ * the false-green shape `TESTING.md` §8 warns about.
  */
 class PodcastEpisodeTest {
   private val ctx: Context = mockk(relaxed = true)

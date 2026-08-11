@@ -19,7 +19,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Download integrity - `github-open-issues-test-coverage-candidates.md` Priority A row 5:
+ * Download integrity - the download-integrity issue cluster (see `TESTING.md` §11):
  * [#1838](https://github.com/advplyr/audiobookshelf-app/issues/1838),
  * [#1827](https://github.com/advplyr/audiobookshelf-app/issues/1827),
  * [#1709](https://github.com/advplyr/audiobookshelf-app/issues/1709),
@@ -32,7 +32,7 @@ import org.junit.Test
  * `InternalDownloadManagerTest` already covers partial transfer, lost network, and the Range
  * resume/restart/416 matrix. This class covers the part of the row that was left: **what happens
  * when the expected size is unknown**, which is not a hypothetical - `DownloadItemPart` is created
- * with `fileSize = 0` for cover parts, confirmed from the production side in pass 5, and
+ * with `fileSize = 0` for cover parts, confirmed from the production side in an earlier pass, and
  * `InternalDownloadManager` uses `expectedSize` as its only integrity check
  * (`InternalDownloadManager.kt:98`).
  *
@@ -126,9 +126,9 @@ class DownloadIntegrityTest {
    * `DownloadItemManager.resolveExternalFile` accepts it too, since its zero-size branch only
    * rejects a zero-length file (`DownloadItemManager.kt:485`).
    *
-   * This is the mechanism behind the invalid-cover crash pass 5 traced from the other end: pass 5
-   * found that a zero-byte cover is adopted, and this is how a *non*-empty but non-image cover gets
-   * adopted as well.
+   * This is the mechanism behind the invalid-cover crash traced from the other end in `CoverImageTest`
+   * and `FolderScannerTest`: a zero-byte cover is adopted, and this is how a *non*-empty but
+   * non-image cover gets adopted as well.
    */
   @Test
   fun `a zero expected size download must not accept an HTML error page as the file`() {

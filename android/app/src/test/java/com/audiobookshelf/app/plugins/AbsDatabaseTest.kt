@@ -42,7 +42,7 @@ import org.junit.Test
  * click-count path hit in a prior pass, not a gap in this suite.
  *
  * Two gotchas verified in a throwaway spike before writing these (see
- * `kotlin-android-coverage-audit-pass-4.md` Appendix A.1): production calls the **two-arg**
+ * `TESTING.md` §8): production calls the **two-arg**
  * `call.getString(name, default)`, and a missing record resolves via the **no-arg**
  * `call.resolve()`. Stubbing only the one-arg forms silently does nothing.
  */
@@ -54,8 +54,8 @@ class AbsDatabaseTest {
   fun setUp() {
     AbsTestEnvironment.reset()
     // setCurrentServerConnectionConfig computes a new config's id via DeviceManager.getBase64Id,
-    // which needs Base64.encodeToString stubbed (see kotlin-android-coverage-audit-pass-4.md's
-    // getBase64Id finding) - harmless for every other test in this class.
+    // which needs Base64.encodeToString stubbed (see TESTING.md §6.1 - this is the
+    // static mock that goes inert if tests are added here) - harmless for the other tests.
     AbsTestEnvironment.mockLocalFileStatics()
     db = DbManager()
     plugin = AbsDatabase()

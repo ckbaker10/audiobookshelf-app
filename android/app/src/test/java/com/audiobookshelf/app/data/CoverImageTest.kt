@@ -24,8 +24,7 @@ import org.junit.Test
 
 /**
  * Covers a user-reported hard crash: a book whose cover image was not successfully downloaded
- * crashed the app. Traced (see `kotlin-android-coverage-audit-pass-5.md` Part 3, P0 and Appendix
- * A.1) to one missing guard reached from four call sites - none of `LocalLibraryItem
+ * crashed the app. Traced (see `TESTING.md` §7.1 remediation 16) to one missing guard reached from four call sites - none of `LocalLibraryItem
  * .getMediaDescription`, `PlaybackSession.resolveCoverBitmapAsync`, `LocalLibraryItem.getCoverUri`
  * or `PlaybackSession.getCoverUri` catch a failure decoding/resolving a cover that is present on
  * disk as a record but unreadable as an image (zero-byte, truncated, moved, or outside the

@@ -40,7 +40,7 @@ import org.junit.Test
  * would fail; one asserting only "did not throw" would pass vacuously forever. Neither is worth
  * writing - this is the same `Handler`-dispatch blocker `AbsDatabase.updateDeviceSettings` and
  * `MediaSessionCallback`'s click-count path hit in earlier passes, and it is recorded in the
- * blocked list in `kotlin-android-coverage-audit-pass-6.md`.
+ * blocked list in `TESTING.md` §6.
  *
  * What *is* reachable, and is what this suite covers:
  * * the three methods with no `Handler` wrapper at all (`getSleepTimerTime`, `getIsCastAvailable`,

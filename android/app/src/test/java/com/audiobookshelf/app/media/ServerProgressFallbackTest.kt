@@ -23,7 +23,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * The `fix-progress-save-error` drift, from `drifted-branch-regression-review.md`.
+ * The `fix-progress-save-error` drift (see `TESTING.md` §11).
  *
  * That review recorded: *"Master persists the playback session but does not create/update a
  * `LocalMediaProgress` fallback for server media in either failure path"* - offline, or a server

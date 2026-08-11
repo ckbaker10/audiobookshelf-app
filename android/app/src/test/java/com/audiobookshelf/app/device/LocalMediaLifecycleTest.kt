@@ -23,7 +23,7 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Local media lifecycle - `github-open-issues-test-coverage-candidates.md` Priority A row 6:
+ * Local media lifecycle - the local-media-lifecycle issue cluster (see `TESTING.md` §11):
  * [#1680](https://github.com/advplyr/audiobookshelf-app/issues/1680),
  * [#1630](https://github.com/advplyr/audiobookshelf-app/issues/1630),
  * [#1392](https://github.com/advplyr/audiobookshelf-app/issues/1392). Reported contract:

@@ -31,10 +31,10 @@ import org.junit.Test
 /**
  * `FolderScanner.scanDownloadItem`'s internal-storage branch never touches SAF/`DocumentFile` -
  * `createLocalFile` uses plain `java.io.File` for `item.isInternalStorage` items - so, contrary to
- * a prior pass's blocked-item list, it is fully reachable on the host JVM once three third-party
+ * an earlier assessment, it is fully reachable on the host JVM once three third-party
  * static calls it transitively reaches (`Base64.encodeToString`, `Environment
  * .getExternalStorageDirectory()`, `MimeTypeMap.getSingleton()`) are stubbed. See
- * `kotlin-android-coverage-audit-pass-5.md` B4 and Appendix A.2.
+ * `TESTING.md` §6 for the full known-null list.
  *
  * This class is also where the reported cover-image crash's root cause lives: the `else ->` branch
  * of `scanParts`'s `when` (a part that is neither an audio track nor an ebook file) adopts any file
@@ -263,8 +263,8 @@ class FolderScannerTest {
   }
 
   /**
-   * Characterization, planned in `kotlin-android-coverage-audit-pass-5.md`'s P0 as "currently
-   * inferred, not proven" and left unwritten by pass 5 (audit finding C4).
+   * Characterization. Planned in an earlier pass as "currently inferred, not proven", left
+   * unwritten there, and landed here.
    *
    * A re-download of an item that already has a local record, whose cover part this time resolves
    * to nothing (zero-byte, or gone), leaves the **previous scan's `coverContentUrl` in place**:

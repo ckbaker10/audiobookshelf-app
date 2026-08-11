@@ -25,10 +25,10 @@ import org.junit.Test
 
 /**
  * `DownloadItemManager` owns the app-managed download queue - user-visible data loss territory,
- * and the largest completely untested reachable class found in the pass-4 audit.
+ * and once the largest completely untested reachable class in the app.
  *
  * Test-environment fact this suite relies on (verified empirically, see
- * `kotlin-android-coverage-audit-pass-4.md` Appendix A.1's follow-up spike): `android.os.StatFs`
+ * `TESTING.md` §6): `android.os.StatFs`
  * constructs without throwing under the mockable `android.jar`, but `totalBytes`/`availableBytes`
  * both read `0`. That makes `tryReserve()`'s space check always fail, so `checkUpdateDownloadQueue`
  * can never reach `startDownload()` (no real network I/O risk from these tests) - a part that is

@@ -321,7 +321,7 @@ class MediaProgressSyncerTest {
   // --- syncFromServerProgress: the remote-overwrite path -------------------------------------
 
   /**
-   * Part of the progress-conflict cluster (see `ProgressConflictTest`), landed as a
+   * Part of the progress-conflict cluster (see `ProgressConflictTest` and `TESTING.md` §7.2), landed as a
    * **characterization** test rather than an enabled failure after checking the caller.
    *
    * `syncFromServerProgress` (`MediaProgressSyncer.kt:213`) assigns `currentTime` and `updatedAt`
@@ -333,7 +333,7 @@ class MediaProgressSyncerTest {
    * `mediaProgressSyncer.currentPlaybackSession` object (`:845`, `:874`). An older server record
    * therefore cannot reach this method in production today, so asserting the invariant here would
    * be a failing spec against an unreachable path - the thing
-   * `github-open-issues-test-coverage-reference.md`'s triage note warns against.
+   * `TESTING.md` §1 rule 7 warns against.
    *
    * Two facts worth recording while here: the `// Currently unused` comment above the method
    * (`:212`) is **stale** - it is called - and the guard lives in the caller rather than the

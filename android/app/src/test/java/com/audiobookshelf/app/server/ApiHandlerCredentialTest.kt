@@ -19,8 +19,8 @@ import org.junit.Before
 import org.junit.Test
 
 /**
- * Credential preservation across transient failures - `github-open-issues-test-coverage-reference
- * .md` Priority A row 3: [#1908](https://github.com/advplyr/audiobookshelf-app/issues/1908),
+ * Credential preservation across transient failures - the auth/transient-HTTP issue cluster
+ * (see `TESTING.md` §11): [#1908](https://github.com/advplyr/audiobookshelf-app/issues/1908),
  * [#1900](https://github.com/advplyr/audiobookshelf-app/issues/1900),
  * [#1901](https://github.com/advplyr/audiobookshelf-app/issues/1901). Reported contract:
  *

@@ -9,7 +9,7 @@ import org.junit.Test
 
 /**
  * Bounds and volume behaviour for `Podcast` and `PlaybackSession`, from
- * `github-open-issues-test-coverage-reference.md` Priority A row 7 -
+ * the large/invalid-media issue cluster (see `TESTING.md` §11) -
  * [#1684](https://github.com/advplyr/audiobookshelf-app/issues/1684),
  * [#1650](https://github.com/advplyr/audiobookshelf-app/issues/1650),
  * [#1731](https://github.com/advplyr/audiobookshelf-app/issues/1731). Reported contract:
@@ -22,7 +22,7 @@ import org.junit.Test
  *
  * The Cast queue/timeline half of that row stays out of scope - `CastTimeline` and
  * `CastTimelineTracker` need `android.util.SparseArray`, whose `get`/`put` are no-ops under the
- * mockable `android.jar` (recorded in the blocked list since pass 4).
+ * mockable `android.jar` (recorded in `TESTING.md` §6).
  */
 class LargeMediaBoundsTest {
 

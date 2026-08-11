@@ -31,8 +31,7 @@ import org.junit.Test
  * exactly this method on it (`MediaProgressSyncer.kt:328-336`), so whichever session arrives last
  * wins regardless of age.
  *
- * The failing specs below are enabled by design (see `github-open-issues-test-coverage-reference
- * .md`: "Known bugs are enabled failures by design"). Each states its exact inputs, the expected
+ * The failing specs below are enabled by design (`TESTING.md` §1 rule 3). Each states its exact inputs, the expected
  * result, and the currently observed result. The production fix belongs on its own branch.
  *
  * The **server** direction (`updateFromServerMediaProgress`) is deliberately not specified here as
