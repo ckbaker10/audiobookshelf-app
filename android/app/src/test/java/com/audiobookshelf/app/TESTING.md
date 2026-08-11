@@ -388,7 +388,8 @@ main quality mechanism — keep it.
 
 All seven Priority-A clusters from the open-issue review now have suites (§4): progress
 conflict, auth/transient HTTP, large/invalid media, pause/external control, connectivity
-state, download integrity, local-media lifecycle. That is 31 of the 52 reviewed issues.
+state, download integrity, local-media lifecycle. That is 29 distinct issues (28 across the
+seven clusters, plus #1817), of the 52 reviewed.
 Priority B (five clusters) is deferred per §9.2.
 
 Drifted branches:
