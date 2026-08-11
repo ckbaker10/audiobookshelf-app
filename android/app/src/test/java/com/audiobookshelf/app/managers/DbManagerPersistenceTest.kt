@@ -18,6 +18,7 @@ import com.audiobookshelf.app.data.book
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.plugins.AbsLog
 import com.audiobookshelf.app.support.AbsTestEnvironment
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -31,6 +32,16 @@ class DbManagerPersistenceTest {
   fun setUp() {
     AbsTestEnvironment.reset()
     db = DbManager()
+  }
+
+  /**
+   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
+   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
+   * whichever class runs next.
+   */
+  @After
+  fun tearDown() {
+    AbsTestEnvironment.reset()
   }
 
   @Test

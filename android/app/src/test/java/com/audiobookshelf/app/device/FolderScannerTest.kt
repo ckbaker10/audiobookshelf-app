@@ -262,6 +262,58 @@ class FolderScannerTest {
     )
   }
 
+  /**
+   * Characterization, planned in `kotlin-android-coverage-audit-pass-5.md`'s P0 as "currently
+   * inferred, not proven" and left unwritten by pass 5 (audit finding C4).
+   *
+   * A re-download of an item that already has a local record, whose cover part this time resolves
+   * to nothing (zero-byte, or gone), leaves the **previous scan's `coverContentUrl` in place**:
+   * `scanParts` only ever assigns `coverContentUrl` inside the `else ->` branch it reaches when
+   * `createLocalFile` returned non-null (`FolderScanner.kt:180-182`), and there is no branch that
+   * clears it. The existing record is loaded and mutated, not rebuilt
+   * (`scanDownloadItem`, `:281-283`).
+   *
+   * Whether that is right is genuinely arguable - keeping a working cover from the previous scan is
+   * better than blanking it, but it also means a cover that has become unreadable on disk stays
+   * referenced. So this is recorded as observed behaviour rather than asserted as a contract; what
+   * matters is that a change to it is visible. The inference is now proven either way.
+   */
+  @Test
+  fun `a re-download whose cover fails to resolve keeps the previous scan's cover`() {
+    val track = File(dir, "t.mp3").apply { writeBytes(ByteArray(2048)) }
+    val goodCover = File(dir, "cover.jpg").apply { writeBytes(ByteArray(512)) }
+    val firstScan =
+            scanSync(
+                    downloadItem(
+                            parts = arrayOf(
+                                    part("p-audio", "t.mp3", track.absolutePath, audioTrack = audioTrack(1)),
+                                    part("p-cover", "cover.jpg", goodCover.absolutePath)
+                            )
+                    )
+            )
+    val originalCover = firstScan!!.localLibraryItem.coverContentUrl
+    assertNotNull("guard: the first scan must actually have adopted a cover", originalCover)
+    db.saveLocalLibraryItem(firstScan.localLibraryItem)
+
+    // Re-download into the same item folder; this time the cover part lands as a zero-byte file.
+    goodCover.writeBytes(ByteArray(0))
+    val secondScan =
+            scanSync(
+                    downloadItem(
+                            parts = arrayOf(
+                                    part("p-audio", "t.mp3", track.absolutePath, audioTrack = audioTrack(1)),
+                                    part("p-cover", "cover.jpg", goodCover.absolutePath)
+                            )
+                    )
+            )
+
+    assertEquals(
+            "the stale cover from the previous scan is retained, not cleared",
+            originalCover,
+            secondScan!!.localLibraryItem.coverContentUrl
+    )
+  }
+
   @Test
   fun `the resulting local library item is persisted to the database`() {
     val track = File(dir, "t.mp3").apply { writeBytes(ByteArray(2048)) }

@@ -6,6 +6,7 @@ import io.mockk.every
 import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.unmockkStatic
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -22,6 +23,16 @@ class DeviceManagerVersionTest {
   private fun withServerVersion(version: String) {
     DeviceManager.serverConnectionConfig =
             ServerConnectionConfig("id", 0, "n", "https://x", version, "u", "un", "t", null)
+  }
+
+  /**
+   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
+   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
+   * whichever class runs next.
+   */
+  @After
+  fun tearDown() {
+    AbsTestEnvironment.reset()
   }
 
   @Test

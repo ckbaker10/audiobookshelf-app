@@ -8,6 +8,7 @@ import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -20,6 +21,16 @@ class AbsLoggerTest {
   fun setUp() {
     AbsTestEnvironment.reset()
     db = DbManager()
+  }
+
+  /**
+   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
+   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
+   * whichever class runs next.
+   */
+  @After
+  fun tearDown() {
+    AbsTestEnvironment.reset()
   }
 
   @Test

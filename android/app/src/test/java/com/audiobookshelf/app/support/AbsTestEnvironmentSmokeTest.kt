@@ -1,6 +1,7 @@
 package com.audiobookshelf.app.support
 
 import com.audiobookshelf.app.device.DeviceManager
+import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Before
@@ -9,6 +10,16 @@ import org.junit.Test
 class AbsTestEnvironmentSmokeTest {
   @Before
   fun setUp() {
+    AbsTestEnvironment.reset()
+  }
+
+  /**
+   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
+   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
+   * whichever class runs next.
+   */
+  @After
+  fun tearDown() {
     AbsTestEnvironment.reset()
   }
 

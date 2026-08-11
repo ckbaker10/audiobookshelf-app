@@ -119,14 +119,23 @@ class CoverImageTest {
       )
 
       var thrown: Throwable? = null
+      var artResolved = false
       try {
-        val job = session.resolveCoverBitmapAsync(ctx, CoroutineScope(Dispatchers.Default)) {}
+        val job =
+                session.resolveCoverBitmapAsync(ctx, CoroutineScope(Dispatchers.Default)) {
+                  artResolved = true
+                }
         runBlocking { job?.join() }
       } catch (e: Throwable) {
         thrown = e
       }
 
       assertNull("an undecodable local cover must not crash playback start", thrown)
+      // "Does not crash" and "still tells the UI art resolution finished" are different contracts,
+      // and only the second one clears the loading state. A fix that swallows the decode failure
+      // without invoking onArtResolved would trade a crash for a spinner that never stops - so the
+      // callback is asserted here rather than passed as an ignored `{}`.
+      assertTrue("onArtResolved must still fire so the UI stops waiting for art", artResolved)
     }
   }
 
@@ -148,8 +157,9 @@ class CoverImageTest {
     }
 
     assertNull("an unresolvable file: cover must not crash every metadata build that reads it", thrown)
-    assertTrue("should fall back to the packaged icon", uri?.contains("R.drawable.icon") != false ||
-            uri?.startsWith("android.resource://") == true)
+    // Pinned against the exact fallback the sibling `getCoverUri with no cover` spec observes, so
+    // that a fix returning null (or any other non-icon value) cannot satisfy this assertion.
+    assertEquals("should fall back to the packaged icon", packagedIconUri(), uri)
   }
 
   @Test
@@ -173,14 +183,24 @@ class CoverImageTest {
     )
 
     var thrown: Throwable? = null
+    var uri: String? = null
     try {
-      session.getCoverUri(ctx)
+      uri = session.getCoverUri(ctx).toString()
     } catch (e: Throwable) {
       thrown = e
     }
 
     assertNull("an unresolvable file: cover must not crash playback session metadata", thrown)
+    assertEquals("should fall back to the packaged icon", packagedIconUri(), uri)
   }
+
+  /**
+   * The packaged-icon fallback URI, read from the one path that already resolves it successfully
+   * (a local item with no cover at all). Building it by hand would mean hard-coding a generated
+   * resource id, which changes whenever resources are added.
+   */
+  private fun packagedIconUri(): String =
+          localLibraryItem(coverContentUrl = null).getCoverUri(ctx).toString()
 
   // --- Normal-behaviour specs: lock in the paths that already work ---------------------------
 
