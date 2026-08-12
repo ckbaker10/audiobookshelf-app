@@ -85,7 +85,14 @@ class ServerProgressFallbackTest {
     every { pns.getSystemService(Context.CONNECTIVITY_SERVICE) } returns
             mockk<ConnectivityManager>(relaxed = true).also {
               every { it.getNetworkCapabilities(any()) } returns
-                      mockk(relaxed = true) { every { hasTransport(any()) } returns true }
+                      mockk(relaxed = true) {
+                        // A working network is a transport *plus* the capabilities that say it
+                        // actually reaches the internet - stubbing the transport alone describes a
+                        // captive portal, which checkConnectivity correctly reports as offline, so
+                        // "online" here would silently have meant "offline".
+                        every { hasTransport(any()) } returns true
+                        every { hasCapability(any()) } returns true
+                      }
             }
   }
 
