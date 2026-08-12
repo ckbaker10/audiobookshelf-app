@@ -143,10 +143,15 @@ class ConnectivityClassificationTest {
   fun `a VPN network that has internet must not be classified as offline`() {
     withTransport(NetworkCapabilities.TRANSPORT_VPN)
     withCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    withCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-
+    // Deliberately no NET_CAPABILITY_VALIDATED, which is the shape this spec's own inputs
+    // describe: on the devices #1702 is reported from, the VPN network object carries
+    // TRANSPORT_VPN plus NET_CAPABILITY_INTERNET and nothing else, because the system's
+    // validation probes run against the underlying network rather than the tunnel. Stubbing
+    // VALIDATED here (as this spec previously did) would have tested a state the reporters never
+    // had, and would let a production check that demands VALIDATED pass while still classifying
+    // their VPN as permanently offline - the exact bug.
     assertTrue(
-            "a validated VPN with internet is a working connection, not an offline state",
+            "a VPN advertising internet is a working connection, not an offline state",
             DeviceManager.checkConnectivity(ctx)
     )
   }
