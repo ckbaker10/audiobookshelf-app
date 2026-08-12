@@ -510,10 +510,15 @@ class MediaManager(private var apiHandler: ApiHandler, var ctx: Context) {
       apiHandler.getLibrarySeriesItems(libraryId, seriesId) { libraryItems ->
         Log.d(tag, "Items for series $seriesId with author $authorId loaded from server | Library $libraryId")
         val libraryItemsWithAudio = libraryItems.filter { li -> li.checkHasTracks() }
-        if (!cachedLibraryAuthors[libraryId]!!.containsKey(authorId)) {
+        // Same cold-cache hazard as the filter overloads above: nothing guarantees this library's
+        // authors have been loaded before a browse lands here (Android Auto can resume straight
+        // into an author's series, or reach it from a voice command). The `?: ""` fallback below
+        // already covers a missing author, so read the map null-safely instead of asserting it.
+        val cachedAuthors = cachedLibraryAuthors[libraryId]
+        if (cachedAuthors == null || !cachedAuthors.containsKey(authorId)) {
           Log.d(tag, "Author data is missing")
         }
-        val authorName = cachedLibraryAuthors[libraryId]!![authorId]?.name ?: ""
+        val authorName = cachedAuthors?.get(authorId)?.name ?: ""
         Log.d(tag, "Using author name: $authorName")
         val libraryItemsFromAuthorWithAudio = libraryItemsWithAudio.filter { li -> li.authorName.indexOf(authorName, ignoreCase = true) >= 0 }
 
