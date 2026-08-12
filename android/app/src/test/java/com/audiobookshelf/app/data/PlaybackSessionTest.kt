@@ -9,8 +9,13 @@ class PlaybackSessionTest {
   fun `empty track list returns safe neutral timing values`() {
     val session = playbackSession(currentTime = 12.0)
 
-    assertEquals(-1, session.getCurrentTrackIndex())
-    assertEquals(-1, session.getNextTrackIndex())
+    // Was asserted as -1 (what unfixed production returns) until this was reconciled
+    // against LargeMediaBoundsTest's "track indices for a session with no tracks must
+    // not be negative", which enables the >= 0 contract as a defect spec. The two
+    // specs asserted opposite outcomes for the identical call; this is the one that
+    // moves, since coercing to 0 is what item 3 in TESTING.md 7.1 prescribes.
+    assertEquals(0, session.getCurrentTrackIndex())
+    assertEquals(0, session.getNextTrackIndex())
     assertEquals(0L, session.getCurrentTrackEndTime())
     assertEquals(0L, session.getNextTrackEndTime())
     assertEquals(0L, session.getCurrentTrackTimeMs())
