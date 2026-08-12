@@ -2,6 +2,7 @@ package com.audiobookshelf.app.device
 
 import com.audiobookshelf.app.data.AudioTrack
 import com.audiobookshelf.app.data.Book
+import com.audiobookshelf.app.data.EBookFile
 import com.audiobookshelf.app.data.LocalFolder
 import com.audiobookshelf.app.data.MediaType
 import com.audiobookshelf.app.data.book
@@ -64,12 +65,18 @@ class LocalMediaLifecycleTest {
   private fun audioTrack(index: Int, duration: Double = 60.0) =
           AudioTrack(index, 0.0, duration, "t$index.mp3", "", "audio/mpeg", null, false, null, index)
 
-  private fun part(id: String, filename: String, finalPath: String, audioTrack: AudioTrack? = null) =
+  private fun part(
+          id: String,
+          filename: String,
+          finalPath: String,
+          audioTrack: AudioTrack? = null,
+          ebookFile: EBookFile? = null
+  ) =
           DownloadItemPart(
                   id = id, downloadItemId = "item-1", filename = filename, fileSize = 10,
                   destinationPath = "$finalPath.part", finalDestinationPath = finalPath,
                   serverPath = "/api/items/x/file", localFolderName = "F", localFolderUrl = "",
-                  localFolderId = "internal-1", ebookFile = null, audioTrack = audioTrack,
+                  localFolderId = "internal-1", ebookFile = ebookFile, audioTrack = audioTrack,
                   episode = null, completed = true, moved = true, isMoving = false, failed = false,
                   uri = mockk(relaxed = true), destinationUri = mockk(relaxed = true),
                   finalDestinationUri = mockk(relaxed = true), completedDestinationUri = null,
@@ -225,6 +232,79 @@ class LocalMediaLifecycleTest {
     val survivor = db.getLocalLibraryItem("local_li-1")
     assertNotNull(survivor)
     assertEquals(1, survivor!!.localFiles.size)
+  }
+
+  /**
+   * The other guard on the spec above, and the one that matters most: an ebook-only download has
+   * **no audio tracks at all**, legitimately and by design. `FolderScanner` rejects a download only
+   * when it found neither tracks *nor* an ebook, and `Book.checkHasTracks()` counts `tracks` alone,
+   * so it is `false` for every ebook the user has ever downloaded.
+   *
+   * A cleanup that removes items on `checkHasTracks()` being false therefore deletes the entire
+   * ebook library - and because `cleanLocalLibraryItems` is called from `AbsDatabase.load()`, it
+   * does so on the next app start, with no user action and nothing to undo it. This spec exists to
+   * make that failure mode impossible to reintroduce quietly.
+   */
+  @Test
+  fun `an ebook-only item survives cleanup even though it has no audio tracks`() {
+    val ebook = File(dir, "b.epub").apply { writeBytes(ByteArray(4096)) }
+    val scanned =
+            scanSync(
+                    downloadItem(
+                            parts = arrayOf(
+                                    part(
+                                            "p1", "b.epub", ebook.absolutePath,
+                                            ebookFile = EBookFile("ino", null, "epub", false, null, null)
+                                    )
+                            )
+                    )
+            )!!
+    db.saveLocalLibraryItem(scanned.localLibraryItem)
+    assertTrue(
+            "guard: this fixture must really have no audio tracks, or it proves nothing",
+            !scanned.localLibraryItem.media.checkHasTracks()
+    )
+
+    db.cleanLocalLibraryItems(AbsTestEnvironment.mockContext())
+
+    val survivor = db.getLocalLibraryItem("local_li-1")
+    assertNotNull("a downloaded ebook must not be deleted for having no audio tracks", survivor)
+    assertNotNull(
+            "the ebook file reference must survive with it",
+            (survivor!!.media as Book).ebookFile
+    )
+  }
+
+  /**
+   * The converse: once the ebook's own file is gone, the item really has lost everything and must
+   * not linger as an empty, still-selectable entry - the same contract the audio case asserts.
+   * Without this, preserving ebook items would just move the orphaned-entry bug rather than fix it.
+   */
+  @Test
+  fun `an ebook item whose file is gone does not survive as an empty record`() {
+    val ebook = File(dir, "b.epub").apply { writeBytes(ByteArray(4096)) }
+    val scanned =
+            scanSync(
+                    downloadItem(
+                            parts = arrayOf(
+                                    part(
+                                            "p1", "b.epub", ebook.absolutePath,
+                                            ebookFile = EBookFile("ino", null, "epub", false, null, null)
+                                    )
+                            )
+                    )
+            )!!
+    db.saveLocalLibraryItem(scanned.localLibraryItem)
+
+    ebook.delete()
+    db.cleanLocalLibraryItems(AbsTestEnvironment.mockContext())
+
+    val survivor = db.getLocalLibraryItem("local_li-1")
+    assertTrue(
+            "an item with no tracks and no ebook file left is unplayable and must not remain " +
+                    "selectable; it survived with ${(survivor?.media as? Book)?.ebookFile}",
+            survivor == null || (survivor.media as Book).ebookFile != null
+    )
   }
 
   @Test
