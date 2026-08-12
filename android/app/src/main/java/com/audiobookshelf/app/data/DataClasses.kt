@@ -160,6 +160,7 @@ class Book(
   }
   @JsonIgnore
   override fun addAudioTrack(audioTrack:AudioTrack) {
+    if (tracks == null) tracks = mutableListOf()
     tracks?.add(audioTrack)
 
     var totalDuration = 0.0

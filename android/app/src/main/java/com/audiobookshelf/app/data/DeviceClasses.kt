@@ -214,16 +214,19 @@ data class DeviceSettings(
     get() = jumpForwardTime * 1000L
   @get:JsonIgnore
   val autoSleepTimerStartHour
-    get() = autoSleepTimerStartTime.split(":")[0].toInt()
+    // A malformed or separator-less string (never persisted by this app, but not otherwise
+    // validated on the way in) must not crash the hour/minute lookup - fall back to the
+    // default("22:00") start/("06:00") end used when a device has no explicit setting yet.
+    get() = autoSleepTimerStartTime.split(":").getOrNull(0)?.toIntOrNull() ?: 22
   @get:JsonIgnore
   val autoSleepTimerStartMinute
-    get() = autoSleepTimerStartTime.split(":")[1].toInt()
+    get() = autoSleepTimerStartTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
   @get:JsonIgnore
   val autoSleepTimerEndHour
-    get() = autoSleepTimerEndTime.split(":")[0].toInt()
+    get() = autoSleepTimerEndTime.split(":").getOrNull(0)?.toIntOrNull() ?: 6
   @get:JsonIgnore
   val autoSleepTimerEndMinute
-    get() = autoSleepTimerEndTime.split(":")[1].toInt()
+    get() = autoSleepTimerEndTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
 
   @JsonIgnore
   fun getShakeThresholdGravity(): Float { // Used in ShakeDetector
