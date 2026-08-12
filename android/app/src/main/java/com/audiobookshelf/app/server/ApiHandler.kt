@@ -214,14 +214,29 @@ class ApiHandler(var ctx:Context) {
         override fun onFailure(call: Call, e: IOException) {
           Log.e(tag, "handleTokenRefresh: Failed to connect to refresh endpoint", e)
           AbsLogger.error(tag, "handleTokenRefresh: Failed to connect to refresh endpoint for server ${DeviceManager.serverConnectionConfigString} (error: ${e.message})")
-          handleRefreshFailure(callback)
+          // A transport-level failure (dropped connection, DNS, captive portal, VPN transition)
+          // is retryable - nothing about it says the refresh token is invalid, so the session must
+          // not be discarded the way handleRefreshFailure does.
+          val errorObj = JSObject()
+          errorObj.put("error", "Failed to connect to refresh endpoint")
+          callback(errorObj)
         }
 
         override fun onResponse(call: Call, response: Response) {
           response.use {
             if (!it.isSuccessful) {
-              AbsLogger.error(tag, "handleTokenRefresh: Refresh request failed with status ${it.code} for server ${DeviceManager.serverConnectionConfigString}")
-              handleRefreshFailure(callback)
+              if (it.code == 401) {
+                // The one response that actually means this refresh token is no longer valid.
+                AbsLogger.error(tag, "handleTokenRefresh: Refresh token rejected (401) for server ${DeviceManager.serverConnectionConfigString}")
+                handleRefreshFailure(callback)
+              } else {
+                // 5xx/429/etc are retryable - a restarting or overloaded server must not log the
+                // user out, unlike a 401 which specifically means the refresh token is invalid.
+                AbsLogger.error(tag, "handleTokenRefresh: Refresh request failed with status ${it.code} for server ${DeviceManager.serverConnectionConfigString}")
+                val errorObj = JSObject()
+                errorObj.put("error", "Refresh request failed with status ${it.code}")
+                callback(errorObj)
+              }
               return
             }
 
@@ -231,8 +246,12 @@ class ApiHandler(var ctx:Context) {
               val userObj = responseJson.optJSONObject("user")
 
               if (userObj == null) {
+                // A 2xx with an unexpected body shape is not the same as a 401 - it says nothing
+                // about whether the refresh token itself is valid, so it must not log the user out.
                 AbsLogger.error(tag, "handleTokenRefresh: No user object in refresh response for server ${DeviceManager.serverConnectionConfigString}")
-                handleRefreshFailure(callback)
+                val errorObj = JSObject()
+                errorObj.put("error", "Unexpected refresh response shape")
+                callback(errorObj)
                 return
               }
 
@@ -241,7 +260,9 @@ class ApiHandler(var ctx:Context) {
 
               if (newAccessToken.isEmpty()) {
                 AbsLogger.error(tag, "handleTokenRefresh: No access token in refresh response for server ${DeviceManager.serverConnectionConfigString}")
-                handleRefreshFailure(callback)
+                val errorObj = JSObject()
+                errorObj.put("error", "Unexpected refresh response shape")
+                callback(errorObj)
                 return
               }
 
@@ -255,9 +276,15 @@ class ApiHandler(var ctx:Context) {
               retryOriginalRequest(originalRequest, newAccessToken, httpClient, callback)
 
             } catch (e: Exception) {
+              // Same principle as above: a response that fails to parse is not proof the refresh
+              // token is invalid (it can also be what a retried connection after a transport
+              // failure looks like once OkHttp's automatic retry lands on a still-exhausted mock
+              // response queue), so it must not log the user out either.
               Log.e(tag, "handleTokenRefresh: Failed to parse refresh response", e)
               AbsLogger.error(tag, "handleTokenRefresh: Failed to parse refresh response for server ${DeviceManager.serverConnectionConfigString} (error: ${e.message})")
-              handleRefreshFailure(callback)
+              val errorObj = JSObject()
+              errorObj.put("error", "Failed to parse refresh response")
+              callback(errorObj)
             }
           }
         }
