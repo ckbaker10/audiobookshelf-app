@@ -416,13 +416,19 @@ class ApiHandler(var ctx:Context) {
     try {
       Log.d(tag, "handleRefreshFailure: Token refresh failed, clearing session")
 
+      // Captured before the config is cleared. DeviceManager.serverConnectionConfigId is defined
+      // as `serverConnectionConfig?.id ?: ""`, so reading it after the null-out below always
+      // yielded "" - which silently skipped both the removeRefreshToken call and the listener
+      // notification guarded by the same check, leaving the rejected refresh token behind in
+      // secure storage on every logout this path performs.
+      val serverConnectionConfigId = DeviceManager.serverConnectionConfigId
+
       // Clear the current server connection
       DeviceManager.serverConnectionConfig = null
       DeviceManager.deviceData.lastServerConnectionConfigId = null
       DeviceManager.dbManager.saveDeviceData(DeviceManager.deviceData)
 
       // Remove refresh token from secure storage
-      val serverConnectionConfigId = DeviceManager.serverConnectionConfigId
       if (serverConnectionConfigId.isNotEmpty()) {
         secureStorage.removeRefreshToken(serverConnectionConfigId)
       }
