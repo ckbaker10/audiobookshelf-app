@@ -121,7 +121,14 @@ class MediaProgressSyncerTest {
     every { pns.getSystemService(Context.CONNECTIVITY_SERVICE) } returns
             mockk<ConnectivityManager>(relaxed = true).also {
               every { it.getNetworkCapabilities(any()) } returns
-                      mockk(relaxed = true) { every { hasTransport(any()) } returns true }
+                      mockk(relaxed = true) {
+                        // A working network is a transport *plus* the capabilities that say it
+                        // actually reaches the internet - stubbing the transport alone describes a
+                        // captive portal, which checkConnectivity correctly reports as offline and
+                        // which would make this test assert against the wrong branch.
+                        every { hasTransport(any()) } returns true
+                        every { hasCapability(any()) } returns true
+                      }
             }
 
     // No server is actually listening; sendLocalProgressSync will fail to connect, which is
