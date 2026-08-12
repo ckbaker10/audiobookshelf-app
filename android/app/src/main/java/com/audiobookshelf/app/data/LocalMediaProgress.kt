@@ -57,6 +57,11 @@ class LocalMediaProgress(
 
   @JsonIgnore
   fun updateFromPlaybackSession(playbackSession:PlaybackSession) {
+    // A session no newer than what's already stored must not overwrite it - out-of-order
+    // delivery (a duplicate sync callback, a session restored after a restart) would otherwise
+    // drag lastUpdate backwards and poison every later server/device reconciliation that compares
+    // on it.
+    if (playbackSession.updatedAt <= lastUpdate) return
     currentTime = playbackSession.currentTime
     progress = playbackSession.progress
     lastUpdate = playbackSession.updatedAt
