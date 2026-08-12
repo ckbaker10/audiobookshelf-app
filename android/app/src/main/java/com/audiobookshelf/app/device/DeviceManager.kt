@@ -156,28 +156,38 @@ object DeviceManager {
     val connectivityManager =
             ctx.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
     val capabilities = connectivityManager.getNetworkCapabilities(connectivityManager.activeNetwork)
-    if (capabilities != null) {
-      if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
-        Log.i("Internet", "NetworkCapabilities.TRANSPORT_CELLULAR")
-        return true
-      } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
-        Log.i("Internet", "NetworkCapabilities.TRANSPORT_ETHERNET")
-        return true
-      } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
-        // Wi-Fi and VPN are exactly where a captive portal (hotel/airport/corporate guest
-        // Wi-Fi) or a split-tunnel VPN without internet shows up: the transport is associated
-        // while the network still isn't usable. Require a capability that actually means "this
-        // connection works" rather than trusting transport presence alone, unlike cellular and
-        // ethernet above where that gap doesn't occur in practice.
-        if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
-            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
-          Log.i("Internet", "NetworkCapabilities.TRANSPORT_WIFI/TRANSPORT_VPN validated")
-          return true
-        }
-      }
+    if (capabilities == null) return false
+
+    // TRANSPORT_VPN was missing entirely, which is why a working VPN read as a permanent offline
+    // state and every server sync was skipped.
+    val hasUsableTransport =
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
+                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+    if (!hasUsableTransport) {
+      Log.i("Internet", "checkConnectivity: no usable transport")
+      return false
     }
-    return false
+
+    // Both capabilities are required, and NET_CAPABILITY_INTERNET on its own is not enough: it
+    // only means the network *intends* to provide internet, which a captive portal's own DHCP and
+    // DNS advertise quite happily. NET_CAPABILITY_VALIDATED is the one that says the system probed
+    // the network and actually reached the internet through it, so a hotel/airport portal, a
+    // carrier walled garden after prepaid data runs out, and a router whose uplink is down are all
+    // correctly classified as offline instead of hanging every request against a login page.
+    val advertisesInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    val isValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+    if (!advertisesInternet || !isValidated) {
+      Log.i(
+              "Internet",
+              "checkConnectivity: transport present but not usable (internet=$advertisesInternet, validated=$isValidated)"
+      )
+      return false
+    }
+
+    Log.i("Internet", "checkConnectivity: validated connection")
+    return true
   }
 
   /**
