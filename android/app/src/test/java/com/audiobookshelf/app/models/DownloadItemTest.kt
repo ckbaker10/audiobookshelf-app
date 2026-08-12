@@ -18,6 +18,23 @@ class DownloadItemTest {
     assertFalse(downloadItem(part(completed = true), part(completed = true, isMoving = true)).isDownloadFinished)
   }
 
+  /**
+   * Settles the product rule the Android test plan left open: `isDownloadFinished` is
+   * `!parts.any { ... }`, so an item with no parts is vacuously finished, whereas the pre-overhaul
+   * branch's test expected an empty item *not* to be finished. The plan asked for that difference
+   * to be decided and documented rather than silently ported.
+   *
+   * Decision: vacuously finished is correct, and this spec pins it. `DownloadItemManager` drives an
+   * item to completion by watching this flag, so an empty item that reported "not finished" would
+   * sit in the queue forever with nothing left that could ever complete it - a permanently stuck
+   * entry. Reporting it finished lets the normal completion path retire it immediately, which is
+   * the desired handling of "there was nothing to download".
+   */
+  @Test
+  fun `an item with no parts is finished rather than stuck in the queue`() {
+    assertTrue(downloadItem().isDownloadFinished)
+  }
+
   @Test
   fun `next parts skips completed failed and active parts`() {
     val queuedFirst = part()
