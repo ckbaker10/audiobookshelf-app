@@ -589,11 +589,64 @@ class MediaManagerTest {
     mediaManager.loadAuthorSeriesBooksWithAudio("lib-1", "author-1", "series-1") { firstLatch.countDown() }
     assertTrue(firstLatch.await(5, TimeUnit.SECONDS))
 
+    // Measured rather than hard-coded: the setup above already had to load the author list, so the
+    // absolute count at this point is not 1 and asserting a literal made this spec fail even once
+    // the cache key was fixed. What the defect is actually about is whether the *second* identical
+    // call re-fetches, so the assertion below is the delta across it.
+    val requestsAfterFirstCall = server.requestCount
+
     val secondLatch = CountDownLatch(1)
     mediaManager.loadAuthorSeriesBooksWithAudio("lib-1", "author-1", "series-1") { secondLatch.countDown() }
     assertTrue(secondLatch.await(5, TimeUnit.SECONDS))
 
-    assertEquals("a repeat call for the same author+series should be served from cache", 1, server.requestCount)
+    assertEquals(
+            "a repeat call for the same author+series must be served from cache, issuing no further requests",
+            requestsAfterFirstCall,
+            server.requestCount
+    )
+  }
+
+  /**
+   * The same cold-cache defect shape as the two filter overloads above, in the one place it
+   * survived them: `loadAuthorSeriesBooksWithAudio`'s server callback reads
+   * `cachedLibraryAuthors[libraryId]!!` twice (to check for, and then read, the author's name)
+   * without the library's author map necessarily having been populated.
+   *
+   * Every other spec for this method loads the author list first, which is what hides it - but
+   * nothing forces that ordering in production. Android Auto can browse straight into an
+   * author's series (a resumed browse path, or a direct media-id request from a voice command)
+   * without the authors shelf having been opened in this process, and then the `!!` throws inside
+   * an OkHttp callback thread.
+   *
+   * Expected: the callback still fires. The author name is only used to filter by, and the method
+   * already has a `?: ""` fallback for a missing author, so an absent cache is recoverable.
+   */
+  @Test
+  fun `loadAuthorSeriesBooksWithAudio survives a cold author cache instead of throwing`() {
+    server.enqueue(
+            MockResponse().setBody(
+                    JSONObject().apply {
+                      put("results", JSONArray().put(JSONObject(libraryItemJson("book-1", "By Jane", authorName = "Jane Doe"))))
+                    }.toString()
+            )
+    )
+
+    val latch = CountDownLatch(1)
+    var result: List<LibraryItem>? = null
+    var thrown: Throwable? = null
+    try {
+      // No loadAuthorsWithBooks call first - the author cache for "lib-1" is empty.
+      mediaManager.loadAuthorSeriesBooksWithAudio("lib-1", "author-1", "series-1") {
+        result = it
+        latch.countDown()
+      }
+    } catch (e: Throwable) {
+      thrown = e
+    }
+
+    assertNull("an unpopulated author cache must not throw out of the browse path", thrown)
+    assertTrue("the callback must still fire so the browse request completes", latch.await(5, TimeUnit.SECONDS))
+    assertEquals(listOf("book-1"), result?.map { it.id })
   }
 
   /**
