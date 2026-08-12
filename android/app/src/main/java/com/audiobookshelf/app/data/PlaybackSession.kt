@@ -169,15 +169,21 @@ class PlaybackSession(
       var coverUri = Uri.parse(localLibraryItem?.coverContentUrl.toString())
       if (coverUri.toString().startsWith("file:")) {
         coverUri =
-                FileProvider.getUriForFile(
-                        ctx,
-                        "${BuildConfig.APPLICATION_ID}.fileprovider",
-                        coverUri.toFile()
-                )
+                try {
+                  FileProvider.getUriForFile(
+                          ctx,
+                          "${BuildConfig.APPLICATION_ID}.fileprovider",
+                          coverUri.toFile()
+                  )
+                } catch (e: Exception) {
+                  // A cover recorded with a file: path FileProvider isn't configured to serve
+                  // (moved storage, SD card removed) throws IllegalArgumentException here on a
+                  // real device.
+                  return Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
+                }
       }
 
       return coverUri
-              ?: Uri.parse("android.resource://${BuildConfig.APPLICATION_ID}/" + R.drawable.icon)
     }
 
     if (coverPath == null)
@@ -263,12 +269,19 @@ class PlaybackSession(
     // Local covers get bitmap synchronously, no async fetch needed
     if (localLibraryItem?.coverContentUrl != null) {
       resolvedCoverBitmap =
-              if (Build.VERSION.SDK_INT < 28) {
-                MediaStore.Images.Media.getBitmap(ctx.contentResolver, coverUri)
-              } else {
-                val source: ImageDecoder.Source =
-                        ImageDecoder.createSource(ctx.contentResolver, coverUri)
-                ImageDecoder.decodeBitmap(source)
+              try {
+                if (Build.VERSION.SDK_INT < 28) {
+                  MediaStore.Images.Media.getBitmap(ctx.contentResolver, coverUri)
+                } else {
+                  val source: ImageDecoder.Source =
+                          ImageDecoder.createSource(ctx.contentResolver, coverUri)
+                  ImageDecoder.decodeBitmap(source)
+                }
+              } catch (e: Exception) {
+                // Cover on disk is a record but not decodable as an image. onArtResolved still
+                // has to fire below - otherwise the UI waits forever for art that will never
+                // arrive, trading a crash for a spinner that never clears.
+                null
               }
       onArtResolved()
       return null
