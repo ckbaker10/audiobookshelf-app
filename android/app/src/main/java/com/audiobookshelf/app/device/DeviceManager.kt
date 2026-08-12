@@ -160,33 +160,42 @@ object DeviceManager {
 
     // TRANSPORT_VPN was missing entirely, which is why a working VPN read as a permanent offline
     // state and every server sync was skipped.
+    val isVpn = capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
     val hasUsableTransport =
             capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) ||
                     capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
                     capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) ||
-                    capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)
+                    isVpn
     if (!hasUsableTransport) {
       Log.i("Internet", "checkConnectivity: no usable transport")
       return false
     }
 
-    // Both capabilities are required, and NET_CAPABILITY_INTERNET on its own is not enough: it
-    // only means the network *intends* to provide internet, which a captive portal's own DHCP and
-    // DNS advertise quite happily. NET_CAPABILITY_VALIDATED is the one that says the system probed
-    // the network and actually reached the internet through it, so a hotel/airport portal, a
-    // carrier walled garden after prepaid data runs out, and a router whose uplink is down are all
-    // correctly classified as offline instead of hanging every request against a login page.
+    // NET_CAPABILITY_INTERNET on its own is not enough: it only means the network *intends* to
+    // provide internet, which a captive portal's own DHCP and DNS advertise quite happily.
+    // NET_CAPABILITY_VALIDATED is the one that says the system probed the network and actually
+    // reached the internet through it, so a hotel/airport portal, a carrier walled garden after
+    // prepaid data runs out, and a router whose uplink is down are all correctly classified as
+    // offline instead of hanging every request against a login page.
     val advertisesInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
-    val isValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-    if (!advertisesInternet || !isValidated) {
-      Log.i(
-              "Internet",
-              "checkConnectivity: transport present but not usable (internet=$advertisesInternet, validated=$isValidated)"
-      )
+    if (!advertisesInternet) {
+      Log.i("Internet", "checkConnectivity: transport present but does not advertise internet")
       return false
     }
 
-    Log.i("Internet", "checkConnectivity: validated connection")
+    // VALIDATED is deliberately not demanded of a VPN. The system runs its connectivity probes
+    // against the underlying network rather than the tunnel, so a perfectly working VPN commonly
+    // presents TRANSPORT_VPN + NET_CAPABILITY_INTERNET and no VALIDATED at all - which is the
+    // state #1702 ("VPN mistaken for permanent offline state") was reported from. Requiring it
+    // here would re-create that bug for the same users. The asymmetry is safe in the direction it
+    // errs: a VPN wrongly treated as online produces failed requests, and a failed sync keeps its
+    // queued session and retries, whereas a VPN wrongly treated as offline skips syncing entirely.
+    if (!isVpn && !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+      Log.i("Internet", "checkConnectivity: transport advertises internet but failed validation")
+      return false
+    }
+
+    Log.i("Internet", "checkConnectivity: usable connection (vpn=$isVpn)")
     return true
   }
 
