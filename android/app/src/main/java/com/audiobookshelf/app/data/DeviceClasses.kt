@@ -87,9 +87,10 @@ data class LocalFile(
 
   @JsonIgnore
   fun isAudioFile(): Boolean {
-    if (mimeType == "application/octet-stream") return true
-    if (mimeType == "video/mp4") return true
-    return mimeType?.startsWith("audio") == true
+    val normalizedMimeType = mimeType?.substringBefore(';')?.trim()?.lowercase()
+    if (normalizedMimeType == "application/octet-stream") return true
+    if (normalizedMimeType == "video/mp4") return true
+    return normalizedMimeType?.startsWith("audio/") == true
   }
   @JsonIgnore
   fun isEBookFile(): Boolean {
@@ -97,12 +98,13 @@ data class LocalFile(
   }
   @JsonIgnore
   fun getEBookFormat(): String? {
-    if (mimeType == "application/epub+zip") return "epub"
-    if (mimeType == "application/pdf") return "pdf"
-    if (mimeType == "application/x-mobipocket-ebook") return "mobi"
-    if (mimeType == "application/vnd.comicbook+zip") return "cbz"
-    if (mimeType == "application/vnd.comicbook-rar") return "cbr"
-    if (mimeType == "application/vnd.amazon.mobi8-ebook") return "azw3"
+    val normalizedMimeType = mimeType?.substringBefore(';')?.trim()?.lowercase()
+    if (normalizedMimeType == "application/epub+zip") return "epub"
+    if (normalizedMimeType == "application/pdf") return "pdf"
+    if (normalizedMimeType == "application/x-mobipocket-ebook") return "mobi"
+    if (normalizedMimeType == "application/vnd.comicbook+zip") return "cbz"
+    if (normalizedMimeType == "application/vnd.comicbook-rar") return "cbr"
+    if (normalizedMimeType == "application/vnd.amazon.mobi8-ebook") return "azw3"
     return null
   }
 }

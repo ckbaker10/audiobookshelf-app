@@ -80,8 +80,19 @@ class PlaybackSession(
             if (localEpisodeId.isNullOrEmpty()) localLibraryItemId
             else "$localLibraryItemId-$localEpisodeId"
   @get:JsonIgnore
-  val progress
-    get() = currentTime / getTotalDuration()
+  val progress: Double
+    get() {
+      val totalDuration = getTotalDuration()
+      if (totalDuration <= 0.0) {
+        // MediaProgressSyncer.kt:241,340 checks progress.isNaN() to detect a session with no
+        // usable duration and skip syncing it. A zero currentTime against a zero duration
+        // preserves that NaN sentinel; any other currentTime has no meaningful fraction, so it
+        // reports the neutral 0.0 instead of the unclamped Infinity a raw division would give.
+        return if (currentTime == 0.0) Double.NaN else 0.0
+      }
+      if (!currentTime.isFinite()) return 0.0
+      return (currentTime / totalDuration).coerceIn(0.0, 1.0)
+    }
   @get:JsonIgnore
   val mediaItemId
     get() = if (episodeId.isNullOrEmpty()) libraryItemId ?: "" else "$libraryItemId-$episodeId"
@@ -116,7 +127,7 @@ class PlaybackSession(
 
   @JsonIgnore
   fun getCurrentTrackEndTime(): Long {
-    val currentTrack = audioTracks[this.getCurrentTrackIndex()]
+    val currentTrack = audioTracks.getOrNull(this.getCurrentTrackIndex()) ?: return 0L
     return currentTrack.startOffsetMs + currentTrack.durationMs
   }
 
@@ -128,13 +139,13 @@ class PlaybackSession(
 
   @JsonIgnore
   fun getNextTrackEndTime(): Long {
-    val currentTrack = audioTracks[this.getNextTrackIndex()]
+    val currentTrack = audioTracks.getOrNull(this.getNextTrackIndex()) ?: return 0L
     return currentTrack.startOffsetMs + currentTrack.durationMs
   }
 
   @JsonIgnore
   fun getCurrentTrackTimeMs(): Long {
-    val currentTrack = audioTracks[this.getCurrentTrackIndex()]
+    val currentTrack = audioTracks.getOrNull(this.getCurrentTrackIndex()) ?: return 0L
     val time = currentTime - currentTrack.startOffset
     return (time * 1000L).toLong()
   }

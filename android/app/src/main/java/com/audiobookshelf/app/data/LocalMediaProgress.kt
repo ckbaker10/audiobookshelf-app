@@ -26,7 +26,10 @@ class LocalMediaProgress(
   var episodeId:String?
 ) : MediaProgressWrapper(isFinished, currentTime, progress) {
   @get:JsonIgnore
-  val progressPercent get() = if (progress.isNaN()) 0 else (progress * 100).roundToInt()
+  val progressPercent
+    get() =
+      if (!progress.isFinite()) 0
+      else (progress * 100).roundToInt().coerceIn(0, 100)
   @get:JsonIgnore
   override val mediaItemId get() = if (libraryItemId != null) {
         if (episodeId.isNullOrEmpty()) libraryItemId ?: "" else "$libraryItemId-$episodeId"
@@ -36,8 +39,8 @@ class LocalMediaProgress(
 
   @JsonIgnore
   fun isMatch(mediaProgress:MediaProgress):Boolean {
-    if (episodeId != null) return libraryItemId == mediaProgress.libraryItemId && episodeId == mediaProgress.episodeId
-    return libraryItemId == mediaProgress.libraryItemId
+    return libraryItemId == mediaProgress.libraryItemId &&
+      episodeId.orEmpty() == mediaProgress.episodeId.orEmpty()
   }
 
   @JsonIgnore
