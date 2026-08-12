@@ -62,11 +62,23 @@ class ConnectivityClassificationTest {
     every { capabilities.hasCapability(capability) } returns true
   }
 
+  /**
+   * The shape of a network that genuinely works: the transport is present *and* the system has
+   * probed it and confirmed internet reachability. Transport presence alone is not enough - see
+   * the captive-portal specs below - so every "counts as connected" case has to say so explicitly
+   * rather than relying on production trusting the transport.
+   */
+  private fun withWorkingInternet() {
+    withCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    withCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+  }
+
   // --- The three transports production recognises ---------------------------------------------
 
   @Test
   fun `cellular counts as connected`() {
     withTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+    withWorkingInternet()
 
     assertTrue(DeviceManager.checkConnectivity(ctx))
   }
@@ -74,6 +86,7 @@ class ConnectivityClassificationTest {
   @Test
   fun `wifi counts as connected`() {
     withTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    withWorkingInternet()
 
     assertTrue(DeviceManager.checkConnectivity(ctx))
   }
@@ -81,6 +94,7 @@ class ConnectivityClassificationTest {
   @Test
   fun `ethernet counts as connected`() {
     withTransport(NetworkCapabilities.TRANSPORT_ETHERNET)
+    withWorkingInternet()
 
     assertTrue(DeviceManager.checkConnectivity(ctx))
   }
@@ -159,6 +173,48 @@ class ConnectivityClassificationTest {
 
     assertFalse(
             "an associated-but-unvalidated network is a captive portal, not a usable connection",
+            DeviceManager.checkConnectivity(ctx)
+    )
+  }
+
+  /**
+   * The **realistic** captive-portal shape, and the reason the spec above is not sufficient on its
+   * own. A hotel/airport network does advertise `NET_CAPABILITY_INTERNET` - that capability means
+   * "this network intends to provide internet", which the portal's own DHCP/DNS quite happily
+   * claims. What it lacks is `NET_CAPABILITY_VALIDATED`: Android probed for connectivity and got
+   * the portal's login page instead of the expected response.
+   *
+   * So `INTERNET` alone proves nothing, and a check written as `INTERNET || VALIDATED` classifies
+   * a captive portal as connected while still passing the spec above (which stubs neither
+   * capability, a combination a real Wi-Fi network essentially never reports). This spec pins the
+   * distinction so that only a check requiring `VALIDATED` can satisfy both.
+   */
+  @Test
+  fun `wifi advertising internet but not validated is a captive portal, not a connection`() {
+    withTransport(NetworkCapabilities.TRANSPORT_WIFI)
+    withCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    // Deliberately no NET_CAPABILITY_VALIDATED - the probe hit the portal's login page.
+
+    assertFalse(
+            "a network claiming internet that failed validation is a portal, not a usable connection",
+            DeviceManager.checkConnectivity(ctx)
+    )
+  }
+
+  /**
+   * The same distinction on cellular, which is why the capability requirement is not scoped to
+   * Wi-Fi. Exhausted prepaid data and carrier top-up walled gardens produce exactly this shape:
+   * the mobile transport is up and advertises internet, while validation fails because every
+   * request is redirected to the carrier's payment page.
+   */
+  @Test
+  fun `cellular advertising internet but not validated is not a usable connection`() {
+    withTransport(NetworkCapabilities.TRANSPORT_CELLULAR)
+    withCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    // Deliberately no NET_CAPABILITY_VALIDATED - carrier walled garden.
+
+    assertFalse(
+            "a carrier walled garden is not a usable connection just because the radio is up",
             DeviceManager.checkConnectivity(ctx)
     )
   }
