@@ -160,12 +160,21 @@ object DeviceManager {
       if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
         Log.i("Internet", "NetworkCapabilities.TRANSPORT_CELLULAR")
         return true
-      } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)) {
-        Log.i("Internet", "NetworkCapabilities.TRANSPORT_WIFI")
-        return true
       } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET)) {
         Log.i("Internet", "NetworkCapabilities.TRANSPORT_ETHERNET")
         return true
+      } else if (capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+                 capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN)) {
+        // Wi-Fi and VPN are exactly where a captive portal (hotel/airport/corporate guest
+        // Wi-Fi) or a split-tunnel VPN without internet shows up: the transport is associated
+        // while the network still isn't usable. Require a capability that actually means "this
+        // connection works" rather than trusting transport presence alone, unlike cellular and
+        // ethernet above where that gap doesn't occur in practice.
+        if (capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) ||
+            capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)) {
+          Log.i("Internet", "NetworkCapabilities.TRANSPORT_WIFI/TRANSPORT_VPN validated")
+          return true
+        }
       }
     }
     return false
