@@ -222,6 +222,12 @@ class DbManager {
         // only items beginning in 0.9.80
         Log.d(tag, "cleanLocalLibraryItems: Local only item ${lli.id} - removing from ABS")
         Paper.book("localLibraryItems").delete(lli.id)
+      } else if (!lli.media.checkHasTracks()) {
+        // The filtering above can leave a server-linked item with zero local files and zero
+        // tracks once every one of them has gone missing - unplayable, but nothing removed it, so
+        // it stayed selectable in the library and the Android Auto browse tree.
+        Log.d(tag, "cleanLocalLibraryItems: Item ${lli.id} has lost every track - removing from ABS")
+        Paper.book("localLibraryItems").delete(lli.id)
       } else if (hasUpdates) {
         Log.d(tag, "cleanLocalLibraryItems: Saving local library item ${lli.id}")
         Paper.book("localLibraryItems").write(lli.id, lli)
