@@ -203,28 +203,34 @@ class ApiHandlerCredentialTest {
   }
 
   /**
-   * Characterization of a second-order bug inside the clearing path itself, found while writing the
-   * two specs above. `handleRefreshFailure` nulls `DeviceManager.serverConnectionConfig` **first**
-   * (`ApiHandler.kt:393`) and only then reads `DeviceManager.serverConnectionConfigId` to decide
-   * whether to remove the stored refresh token (`:399`). That property is defined as
-   * `serverConnectionConfig?.id ?: ""` (`DeviceManager.kt:35`), so by that point it is always empty
-   * and `secureStorage.removeRefreshToken` is **never** called - as is the listener notification
+   * A second-order bug inside the clearing path itself, found while writing the two specs above.
+   * `handleRefreshFailure` nulled `DeviceManager.serverConnectionConfig` **first** and only then
+   * read `DeviceManager.serverConnectionConfigId` to decide whether to remove the stored refresh
+   * token. That property is defined as `serverConnectionConfig?.id ?: ""`
+   * (`DeviceManager.kt:35`), so by that point it was always empty and
+   * `secureStorage.removeRefreshToken` was **never** called - as was the listener notification
    * guarded by the same check.
    *
-   * So today's behaviour is the worst of both: the connection is discarded (the reported bug) while
-   * the now-orphaned refresh token is left in secure storage (the cleanup that was intended). The
-   * specs above ask for the first half to stop happening; this pins the second half so that fixing
-   * the ordering is a deliberate change rather than an accidental side effect.
+   * That made the behaviour the worst of both: the connection was discarded while the
+   * now-orphaned refresh token was left behind in secure storage. A rejected refresh token is
+   * exactly the thing that must not survive a logout - it is the credential the server has
+   * already refused, and leaving it means the next login writes over an entry that a subsequent
+   * failure would otherwise have tried to reuse.
+   *
+   * This was previously pinned as a characterization ("never reaches removeRefreshToken"), on the
+   * grounds that fixing the ordering should be a deliberate change rather than an accidental side
+   * effect. It is now that deliberate change: the id is captured *before* the config is cleared,
+   * and this spec asserts the cleanup actually happens.
    */
   @Test
-  fun `handleRefreshFailure never reaches removeRefreshToken because it clears the config first`() {
+  fun `handleRefreshFailure removes the rejected refresh token it was always meant to clear`() {
     every { secureStorage.getRefreshToken(any()) } returns "refresh-token"
     server.enqueue(MockResponse().setResponseCode(401))
     server.enqueue(MockResponse().setResponseCode(401))
 
     getCurrentUserOnce()
 
-    io.mockk.verify(exactly = 0) { secureStorage.removeRefreshToken(any()) }
+    io.mockk.verify(exactly = 1) { secureStorage.removeRefreshToken("test-server") }
   }
 
   /**
