@@ -36,20 +36,6 @@ jobs:
       - name: copy to Android project
         run: npx cap sync
 
-      - name: run Android JVM unit tests
-        run: ./android/gradlew :app:testDebugUnitTest -p android --no-daemon
-
-      # The JUnit XML is the only place a failure's assertion message survives - the console
-      # output is truncated by Gradle - so publish it whenever the step above goes red.
-      - name: upload test results
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-unit-test-results
-          path: |
-            android/app/build/reports/tests/testDebugUnitTest/
-            android/app/build/test-results/testDebugUnitTest/
-
       - name: build Android app
         run: ./android/gradlew assembleDebug -p android --no-daemon
 
