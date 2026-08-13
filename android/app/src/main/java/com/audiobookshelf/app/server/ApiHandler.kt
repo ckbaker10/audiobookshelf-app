@@ -56,11 +56,13 @@ class ApiHandler(var ctx:Context) {
   private fun getRequest(endpoint:String, httpClient:OkHttpClient?, config:ServerConnectionConfig?, cb: (JSObject) -> Unit) {
     val address = config?.address ?: DeviceManager.serverAddress
     val token = config?.token ?: DeviceManager.token
+    val customHeaders = config?.customHeaders ?: DeviceManager.serverConnectionConfig?.customHeaders
 
     try {
-      val request = Request.Builder()
+      val requestBuilder = Request.Builder()
         .url("${address}$endpoint").addHeader("Authorization", "Bearer $token")
-        .build()
+      customHeaders?.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+      val request = requestBuilder.build()
       makeRequest(request, httpClient, cb)
     } catch(e: Exception) {
       e.printStackTrace()
@@ -73,14 +75,16 @@ class ApiHandler(var ctx:Context) {
   private fun postRequest(endpoint:String, payload: JSObject?, config:ServerConnectionConfig?, cb: (JSObject) -> Unit) {
     val address = config?.address ?: DeviceManager.serverAddress
     val token = config?.token ?: DeviceManager.token
+    val customHeaders = config?.customHeaders ?: DeviceManager.serverConnectionConfig?.customHeaders
     val mediaType = "application/json; charset=utf-8".toMediaType()
     val requestBody = payload?.toString()?.toRequestBody(mediaType) ?: EMPTY_REQUEST
     val requestUrl = "${address}$endpoint"
     Log.d(tag, "postRequest to $requestUrl")
     try {
-      val request = Request.Builder().post(requestBody)
+      val requestBuilder = Request.Builder().post(requestBody)
         .url(requestUrl).addHeader("Authorization", "Bearer ${token}")
-        .build()
+      customHeaders?.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+      val request = requestBuilder.build()
       makeRequest(request, null, cb)
     } catch(e: Exception) {
       e.printStackTrace()
@@ -94,9 +98,10 @@ class ApiHandler(var ctx:Context) {
     val mediaType = "application/json; charset=utf-8".toMediaType()
     val requestBody = payload.toString().toRequestBody(mediaType)
     try {
-      val request = Request.Builder().patch(requestBody)
+      val requestBuilder = Request.Builder().patch(requestBody)
         .url("${DeviceManager.serverAddress}$endpoint").addHeader("Authorization", "Bearer ${DeviceManager.token}")
-        .build()
+      DeviceManager.serverConnectionConfig?.customHeaders?.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+      val request = requestBuilder.build()
       makeRequest(request, null, cb)
     } catch(e: Exception) {
       e.printStackTrace()
@@ -429,8 +434,17 @@ class ApiHandler(var ctx:Context) {
         Log.e(tag, it.getString("error") ?: "getCurrentUser Failed")
         cb(null)
       } else {
-        val user = jacksonMapper.readValue<User>(it.toString())
-        cb(user)
+        try {
+          val user = jacksonMapper.readValue<User>(it.toString())
+          cb(user)
+        } catch (e: Exception) {
+          // Valid JSON that doesn't match User's shape (e.g. a missing non-nullable field) would
+          // otherwise throw here with nothing to catch it, so the callback never fires - not with
+          // the user, not with null, not at all - and a caller waiting on it (or a UI spinner
+          // gated on it) hangs indefinitely.
+          Log.e(tag, "getCurrentUser: failed to parse response", e)
+          cb(null)
+        }
       }
     }
   }
@@ -597,7 +611,12 @@ class ApiHandler(var ctx:Context) {
 
   fun getSearchResults(libraryId:String, queryString:String, cb: (LibraryItemSearchResultType?) -> Unit) {
     Log.d(tag, "Doing search for library $libraryId")
-    getRequest("/api/libraries/$libraryId/search?q=$queryString", null, null) {
+    // queryString is user search input and must not be interpolated raw - an unencoded '&' or
+    // '=' would otherwise split it into extra, attacker/user-controlled query parameters instead
+    // of arriving as a single "q" value.
+    val encodedQuery = HttpUrl.Builder().scheme("http").host("localhost")
+      .addQueryParameter("q", queryString).build().encodedQuery
+    getRequest("/api/libraries/$libraryId/search?$encodedQuery", null, null) {
       if (it.has("error")) {
         Log.e(tag, it.getString("error") ?: "getSearchResults Failed")
         cb(null)
