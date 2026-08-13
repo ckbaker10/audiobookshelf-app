@@ -7,7 +7,6 @@
     "build": "nuxt build",
     "start": "nuxt --hostname 0.0.0.0 --port 1337",
     "generate": "nuxt generate",
-    "test:frontend": "node --test test/frontend/*.test.cjs",
     "sync": "nuxt generate && npx cap sync",
     "icons-android": "cordova-res android --skip-config --copy",
     "ionic:build": "npm run build",
