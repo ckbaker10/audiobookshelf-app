@@ -19,6 +19,7 @@ import android.support.v4.media.MediaMetadataCompat
 import android.support.v4.media.session.MediaControllerCompat
 import android.support.v4.media.session.MediaSessionCompat
 import androidx.media.VolumeProviderCompat
+import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.support.v4.media.session.PlaybackStateCompat
 import android.util.Log
@@ -93,6 +94,86 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     fun onMediaItemHistoryUpdated(mediaItemHistory: MediaItemHistory)
     fun onPlaybackSpeedChanged(playbackSpeed: Float)
   }
+
+  private val audioInterruptionPolicy = AudioInterruptionPolicy()
+  private var audioFocusRequest: AudioFocusRequest? = null
+
+  private val audioFocusChangeListener =
+          AudioManager.OnAudioFocusChangeListener { focusChange ->
+            if (!isStarted) return@OnAudioFocusChangeListener
+            when (focusChange) {
+              AudioManager.AUDIOFOCUS_LOSS -> {
+                Log.d(tag, "Audio focus lost (call/long-term)")
+                applyInterruptionAction(audioInterruptionPolicy.onFocusLoss(currentPlayer.isPlaying))
+              }
+              AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> {
+                Log.d(tag, "Audio focus lost (transient - ringtone/assistant)")
+                applyInterruptionAction(
+                        audioInterruptionPolicy.onFocusLossTransient(currentPlayer.isPlaying)
+                )
+              }
+              AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                Log.d(tag, "Audio focus lost (duck - notification sound)")
+                applyInterruptionAction(
+                        audioInterruptionPolicy.onFocusLossTransientCanDuck(currentPlayer.isPlaying)
+                )
+              }
+              AudioManager.AUDIOFOCUS_GAIN -> {
+                val gainAction = audioInterruptionPolicy.onFocusGain()
+                if (gainAction.restoreVolume) currentPlayer.volume = 1.0f
+                if (gainAction.resume) {
+                  Log.d(tag, "Audio focus gained, resuming playback")
+                  currentPlayer.play()
+                }
+              }
+            }
+          }
+
+  private fun applyInterruptionAction(action: AudioInterruptionPolicy.InterruptionAction) {
+    if (action.seekBackMs > 0L) seekBackward(action.seekBackMs)
+    if (action.pause) currentPlayer.pause()
+  }
+
+  /** Whether [PlayerListener] should skip its own pause-duration auto-rewind this time. */
+  fun consumeSoughtBackForInterruption(): Boolean =
+          audioInterruptionPolicy.consumeSoughtBackForInterruption()
+
+  @Suppress("DEPRECATION")
+  private fun requestAudioFocus() {
+    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      val attrs =
+              android.media.AudioAttributes.Builder()
+                      .setUsage(android.media.AudioAttributes.USAGE_MEDIA)
+                      .setContentType(android.media.AudioAttributes.CONTENT_TYPE_SPEECH)
+                      .build()
+      val request =
+              AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                      .setAudioAttributes(attrs)
+                      .setWillPauseWhenDucked(false) // we handle ducking ourselves
+                      .setOnAudioFocusChangeListener(audioFocusChangeListener)
+                      .build()
+      audioFocusRequest = request
+      audioManager.requestAudioFocus(request)
+    } else {
+      audioManager.requestAudioFocus(
+              audioFocusChangeListener,
+              AudioManager.STREAM_MUSIC,
+              AudioManager.AUDIOFOCUS_GAIN
+      )
+    }
+  }
+
+  @Suppress("DEPRECATION")
+  private fun abandonAudioFocus() {
+    val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+      audioFocusRequest?.let { audioManager.abandonAudioFocusRequest(it) }
+    } else {
+      audioManager.abandonAudioFocus(audioFocusChangeListener)
+    }
+  }
+
   private val binder = LocalBinder()
 
   var clientEventEmitter: ClientEventEmitter? = null
@@ -207,6 +288,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
     mediaSession.release()
     mediaProgressSyncer.reset()
     metadataScope.cancel()
+    abandonAudioFocus()
 
     super.onDestroy()
   }
@@ -409,7 +491,7 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
                     .setUsage(C.USAGE_MEDIA)
                     .setContentType(C.AUDIO_CONTENT_TYPE_SPEECH)
                     .build()
-    mPlayer.setAudioAttributes(audioAttributes, true)
+    mPlayer.setAudioAttributes(audioAttributes, false) // we manage audio focus ourselves
 
     // attach player to playerNotificationManager
     playerNotificationManager.setPlayer(mPlayer)
@@ -952,11 +1034,13 @@ class PlayerNotificationService : MediaBrowserServiceCompat() {
       Log.d(tag, "Already playing")
       return
     }
+    requestAudioFocus()
     currentPlayer.volume = 1F
     currentPlayer.play()
   }
 
   fun pause() {
+    audioInterruptionPolicy.onManualPause()
     currentPlayer.pause()
   }
 

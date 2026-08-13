@@ -61,7 +61,11 @@ class PlayerListener(var playerNotificationService:PlayerNotificationService) : 
 
     if (isPlaying) {
       Log.d(tag, "SeekBackTime: Player is playing")
-      if (lastPauseTime > 0 && DeviceManager.deviceData.deviceSettings?.disableAutoRewind != true) {
+      if (playerNotificationService.consumeSoughtBackForInterruption()) {
+        // Already sought back for this interruption when audio focus was lost - skip the
+        // pause-duration auto-rewind below so we don't rewind twice.
+        lastPauseTime = 0
+      } else if (lastPauseTime > 0 && DeviceManager.deviceData.deviceSettings?.disableAutoRewind != true) {
         Log.d(tag, "SeekBackTime: playing started now set seek back time $lastPauseTime")
         var seekBackTime = calcPauseSeekBackTime()
         if (seekBackTime > 0) {
