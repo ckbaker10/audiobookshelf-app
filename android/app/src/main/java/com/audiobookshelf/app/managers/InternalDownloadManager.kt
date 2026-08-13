@@ -4,7 +4,6 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 import okhttp3.Call
 import okhttp3.Callback
@@ -20,6 +19,11 @@ class InternalDownloadManager(
         private val hasAvailableSpace: () -> Boolean
 ) {
   private val tag = "InternalDownloadManager"
+  // Routed through MtlsManager (rather than a fixed companion client) so a download presents
+  // the configured client certificate when the connected server requires mTLS.
+  private val client: OkHttpClient =
+          MtlsManager.getClient(connectTimeout = 30, readTimeout = 60, writeTimeout = 60)
+
   /**
    * Starts or resumes a download.
    *
@@ -146,11 +150,5 @@ class InternalDownloadManager(
   private companion object {
     const val CHUNK_SIZE = 512 * 1024 // 512 KB
     val CONTENT_RANGE = Regex("bytes (\\d+)-(\\d+)/(?:\\d+|\\*)")
-    val client =
-            OkHttpClient.Builder()
-                    .connectTimeout(30, TimeUnit.SECONDS)
-                    .readTimeout(60, TimeUnit.SECONDS)
-                    .writeTimeout(60, TimeUnit.SECONDS)
-                    .build()
   }
 }
