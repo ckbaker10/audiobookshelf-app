@@ -105,7 +105,9 @@ class PlaybackSession(
         return i
       }
     }
-    return audioTracks.size - 1
+    // -1 for an empty list, which every caller then uses to index audioTracks. Sibling
+    // getTrackStartOffsetMs already guards exactly this (index < 0 || index >= size -> 0L).
+    return (audioTracks.size - 1).coerceAtLeast(0)
   }
 
   @JsonIgnore
@@ -116,7 +118,7 @@ class PlaybackSession(
         return i
       }
     }
-    return audioTracks.size - 1
+    return (audioTracks.size - 1).coerceAtLeast(0)
   }
 
   @JsonIgnore
@@ -431,7 +433,14 @@ class PlaybackSession(
   fun syncData(syncData: MediaProgressSyncData) {
     timeListening += syncData.timeListened
     updatedAt = System.currentTimeMillis()
-    currentTime = syncData.currentTime
+    // The media session, the player listener and the 15-second sync timer can each drive a save,
+    // and none of them is serialised against the others - a delayed callback carrying an earlier
+    // position must not overwrite a later one already recorded. Same missing comparison as the
+    // progress-conflict cluster, reached through the external-control path instead of a stale
+    // session object.
+    if (syncData.currentTime >= currentTime) {
+      currentTime = syncData.currentTime
+    }
   }
 
   @JsonIgnore
@@ -443,7 +452,7 @@ class PlaybackSession(
             getTotalDuration(),
             progress,
             currentTime,
-            false,
+            progress >= 0.99,
             null,
             null,
             updatedAt,
