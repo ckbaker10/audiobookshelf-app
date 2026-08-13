@@ -142,6 +142,37 @@ class PlayerListenerTest {
     assertEquals(false, PlayerListener.lazyIsPlaying)
   }
 
+  @Test
+  fun `onIsPlayingChanged true skips the pause-duration auto-rewind when already sought back for an interruption`() {
+    PlayerListener.lastPauseTime = 12_345L
+    every { player.playbackState } returns Player.STATE_READY
+    every { pns.consumeSoughtBackForInterruption() } returns true
+    val syncer = mockk<MediaProgressSyncer>(relaxed = true)
+    every { pns.mediaProgressSyncer } returns syncer
+    every { pns.sleepTimerManager } returns mockk<SleepTimerManager>(relaxed = true)
+
+    listener.onIsPlayingChanged(true)
+
+    verify(exactly = 0) { pns.seekBackward(any()) }
+    assertEquals(0L, PlayerListener.lastPauseTime)
+  }
+
+  @Test
+  fun `onIsPlayingChanged true still auto-rewinds a normal pause when no interruption was sought back`() {
+    PlayerListener.lastPauseTime = System.currentTimeMillis() - 15_000L
+    every { player.playbackState } returns Player.STATE_READY
+    every { pns.consumeSoughtBackForInterruption() } returns false
+    val syncer = mockk<MediaProgressSyncer>(relaxed = true)
+    every { pns.mediaProgressSyncer } returns syncer
+    every { pns.sleepTimerManager } returns mockk<SleepTimerManager>(relaxed = true)
+    every { pns.getCurrentBookChapter() } returns null
+    every { pns.getCurrentTime() } returns 60_000L
+
+    listener.onIsPlayingChanged(true)
+
+    verify { pns.seekBackward(any()) }
+  }
+
   private fun events(vararg present: Int): Player.Events {
     val events = mockk<Player.Events>()
     every { events.contains(any()) } answers { present.contains(firstArg<Int>()) }
