@@ -1068,6 +1068,16 @@ export default {
         }
       }
 
+      // Arriving from "Switch Server/User" deliberately leaves the session intact, so the last
+      // server connection config still points at the server the user is trying to leave.
+      // Auto-connecting to it re-authenticates and replaces this screen with /bookshelf, so the
+      // picker is never reachable - the user is put straight back into the session they asked to
+      // change. Show the server list instead and let them choose.
+      if (this.$route.query.switching) {
+        this.showForm = !this.serverConnectionConfigs.length
+        return
+      }
+
       if (this.lastServerConnectionConfig) {
         console.log('[ServerConnectForm] init with lastServerConnectionConfig', this.lastServerConnectionConfig)
         this.connectToServer(this.lastServerConnectionConfig)
