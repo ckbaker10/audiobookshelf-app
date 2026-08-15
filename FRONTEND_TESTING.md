@@ -14,7 +14,7 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**214 tests, 27 enabled failures.**
+**235 tests, 29 enabled failures.**
 
 Every failure is a contract that production does not currently meet. They are red on purpose: they
 state what should happen, and each fix belongs on its own branch.
@@ -37,8 +37,9 @@ Found by scanning, with no issue filed:
 | `$sanitizeFilename` throws `ReferenceError: Path is not defined` for any name over 240 chars - `Path` is never imported | `plugins/sanitize-helpers.spec.js` | 1 |
 | `$secondsToTimestampFull` renders `00:00:60`, rounding seconds before deriving minutes so the carry never happens | `plugins/format-helpers.spec.js` | 1 |
 | `TouchEvent.getSwipeDirection()` throws when the end event has not arrived - the null guard sits after the dereference it protects | `objects/touch-event.spec.js` | 1 |
+| A download queued with already-complete parts shows 0%, because progress is only ever derived when a part *changes* | `store/download-queue.spec.js` | 2 |
 
-The other 187 are green: the harness's own tests, the Home shelf characterization, the guards
+The other 206 are green: the harness's own tests, the Home shelf characterization, the guards
 inside each defect file that pin the working path a fix must not break, and behaviour and
 edge-case coverage for the pure helpers, store actions/getters, mixins and `TouchEvent`.
 
