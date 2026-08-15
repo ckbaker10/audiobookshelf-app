@@ -86,11 +86,11 @@ Test-only build settings in `android/app/build.gradle`, each load-bearing:
 
 ## 3. Current state
 
-**560 tests, 7 enabled failures.**
+**560 tests, 0 failures.** The fix queue is empty.
 
-The failure count is the fix queue, not a defect in the suite (§1 rule 3). All seven belong to
-three model guards listed in §7.1; they go green when that fix branch lands and are red here on
-purpose until it does.
+That is the target state, not a permanent one: §1 rule 3 means a newly found defect *should* make
+this number non-zero until its fix lands. If you are reading this and the suite is red, check §7.1
+before assuming something is broken.
 
 For a long stretch this section read "497 tests, 46 enabled failures" while the suite actually had
 503 and 50, and §7.1 listed sixteen remediations that had all already shipped. If you change the
@@ -263,39 +263,34 @@ do this.
 
 ## 7. Known remediations
 
-### 7.1 Production fixes — the open queue
+### 7.1 Production fixes — the queue is empty
 
-**These belong in their own change, separate from the tests** — a test that moves with the code it
-tests proves nothing. Line numbers are indicative; confirm against current source before editing.
+**A fix belongs in its own change, separate from the tests** — a test that moves with the code it
+tests proves nothing. When this queue is non-empty, that is what it looks like: an enabled failing
+spec here, and the fix on a `fix-*` branch cut from master.
 
-Three model guards, seven enabled failures:
+#### What the queue has bought
 
-| # | Fix | Where | Frees |
-| --- | --- | --- | ---: |
-| 1 | Range-check the parsed hour/minute (`takeIf { it in 0..23 }` / `0..59`) before returning it. `"0600".split(":")` is `["0600"]`, which parses to the *integer* 600, so the existing `?:` fallback never fires — there is nothing to fall back from. `SleepTimerManager` then compares the current hour against 600, never matches, and the auto sleep timer silently stops working. | `DeviceSettings.autoSleepTimer*Hour` / `*Minute` | 3 |
-| 2 | Fall back to the `authors` collection when the flat `authorName` is absent. That field is a convenience the server adds only in its *minified* and *expanded* serializers; the plain `toOldJSON()` shape sends `authors` and no `authorName`, so every author renders as "Unknown". | `BookMetadata.getAuthorDisplayName` | 3 |
-| 3 | Return the *first* track when the position is before the first track's start. The fallthrough returns `size - 1` unconditionally, which is right for a position past the end and wrong for one before the start — and `getNextTrackIndex` answers `0` for the same input, so the two disagree. | `PlaybackSession.getCurrentTrackIndex` | 1 |
+Everything previously listed here has shipped. Each item was written as an enabled failing spec
+first, fixed on a separate branch, and went green **with its assertion untouched** — which is the
+whole point of rule 3 and the reason to keep working this way.
 
-#### What the previous queue bought
+The first sixteen closed the progress-conflict cluster, the download-integrity cluster, the
+auth/transient-HTTP cluster, connectivity classification, the cover-image crash, and the orphaned
+local item.
 
-The sixteen remediations this section used to list are all shipped. They were written as enabled
-failing specs first, fixed on separate branches, and every one went green **with its assertion
-untouched** — which is the whole point of rule 3 and the reason to keep working this way. Between
-them they closed the progress-conflict cluster, the download-integrity cluster, the auth/transient
--HTTP cluster, connectivity classification, the cover-image crash, and the orphaned-local-item
-end state.
+Three more came out of a full audit of the suite itself, and are worth recording because of *how*
+they were found — none by adding a new subject, all by sharpening what was already there:
 
-Two of the three fixes now in the queue were found the same way, by an audit that *tightened
-existing assertions* rather than by adding new subjects:
+| Fix | Found by |
+| --- | --- |
+| Range-check `DeviceSettings.autoSleepTimer*Hour`/`*Minute`. `"0600".split(":")` is `["0600"]`, which parses to the *integer* 600, so the `?:` fallback never fired — the missing guard was a range check, not a parse check. `SleepTimerManager` never matches 600, so the auto sleep timer silently stopped working. | Tightening a spec whose expected *minute* of `0` happened to equal the fallback default, and so could not distinguish a parse from a fallback. |
+| `BookMetadata.getAuthorDisplayName` falls back to the `authors` collection. `authorName` is a flat field the server adds only in its *minified* and *expanded* serializers; the plain `toOldJSON()` shape sends `authors` and no `authorName`, so every author rendered as "Unknown". | `GoldenResponseFixtureTest` (§4), on its first run against a real server body — the class of defect a hand-written fixture cannot surface. |
+| `PlaybackSession.getCurrentTrackIndex` returns the *first* track for a position before the first track's start. The fallthrough returned `size - 1` unconditionally — right past the end, wrong before the start — while `getNextTrackIndex` answered `0` for the same input. | Tightening `assertTrue(index in 0..1)`, which admitted both answers while the test's name claimed the first track. |
 
-* the negative track index was hidden behind `assertTrue(index in 0..1)`, which admitted both
-  answers while the test's name claimed the first track;
-* the sleep-timer hour was hidden behind an expectation of `0` for the *minute*, a value that
-  happened to equal the fallback default and so could not distinguish a parse from a fallback.
-
-The third was found by `GoldenResponseFixtureTest` (§4) against a real server body — the class of
-defect a hand-written fixture cannot surface, because a hand-written fixture is written to match
-the model.
+The lesson worth carrying: **a loose assertion is not merely untidy, it conceals defects.** Two of
+these three sat behind assertions that were passing, in tests named for the behaviour they were
+failing to check.
 
 ### 7.2 Characterized on purpose — do not "fix" without a decision
 
