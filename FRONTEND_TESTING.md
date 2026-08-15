@@ -14,7 +14,7 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**131 tests, 23 enabled failures.**
+**214 tests, 27 enabled failures.**
 
 Every failure is a contract that production does not currently meet. They are red on purpose: they
 state what should happen, and each fix belongs on its own branch.
@@ -33,12 +33,14 @@ Found by scanning, with no issue filed:
 
 | Defect | Spec | Red |
 | --- | --- | ---: |
+| A transient failure during token refresh logs the user out and clears the refresh token - the JS twin of Android #1908/#1900, still unfixed here | `plugins/native-http.spec.js` | 3 |
 | `$sanitizeFilename` throws `ReferenceError: Path is not defined` for any name over 240 chars - `Path` is never imported | `plugins/sanitize-helpers.spec.js` | 1 |
 | `$secondsToTimestampFull` renders `00:00:60`, rounding seconds before deriving minutes so the carry never happens | `plugins/format-helpers.spec.js` | 1 |
+| `TouchEvent.getSwipeDirection()` throws when the end event has not arrived - the null guard sits after the dereference it protects | `objects/touch-event.spec.js` | 1 |
 
-The other 108 are green: the harness's own tests, the Home shelf characterization, the guards
-inside each defect file that pin the working path a fix must not break, and the behaviour and
-edge-case coverage for the pure helpers and store getters.
+The other 187 are green: the harness's own tests, the Home shelf characterization, the guards
+inside each defect file that pin the working path a fix must not break, and behaviour and
+edge-case coverage for the pure helpers, store actions/getters, mixins and `TouchEvent`.
 
 If you change the suite, re-run it and update these numbers from the run.
 
@@ -149,8 +151,10 @@ test/
   bookshelf/                  shelf and library-view state
   navigation/                 routing and lifecycle across screens
   connection/                 server connection and auth
-  plugins/                    pure helpers hung off Vue.prototype
-  store/                      Vuex getters, called directly
+  plugins/                    pure helpers and the nativeHttp request/refresh path
+  store/                      Vuex actions, getters and mutations, called directly
+  mixins/                     mixin methods, called with an explicit `this`
+  objects/                    plain classes
 ```
 
 One file per issue or behaviour cluster, named for what it covers rather than for the component it
