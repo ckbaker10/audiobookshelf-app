@@ -127,6 +127,11 @@ export function storeWith({
       // store it throws inside init(), which would look like a defect in the component.
       lastBookshelfScrollData: {},
       showSideDrawer: false,
+      processingBatch: null,
+      isCasting: false,
+      playerIsPlaying: false,
+      playerIsStartingPlayback: false,
+      playerStartingPlaybackMediaId: null,
       user: { user, settings, serverSettings: { version: '2.36.0', ...serverSettings }, serverConnectionConfig: null },
       libraries: { currentLibraryId, libraries: [] },
       globals: { localMediaProgress, bookshelfListView: false, isModalOpen: false }
@@ -134,12 +139,22 @@ export function storeWith({
     getters: {
       getAltViewEnabled: () => false,
       getIsPlayerOpen: () => isPlayerOpen,
+      getIsCurrentSessionLocal: () => false,
+      getIsMediaStreaming: () => () => false,
       getServerSetting: () => (key) => serverSettings[key],
       'user/getUserSetting': () => (key) => settings[key],
       'user/getIsAdminOrUp': () => false,
+      'user/getUserMediaProgress': () => () => null,
+      'user/getUserCanDelete': () => false,
+      'user/getUserCanDownload': () => false,
+      'user/getUserCanUpdate': () => false,
       'libraries/getCurrentLibraryMediaType': () => currentLibraryMediaType,
       'libraries/getBookCoverAspectRatio': () => 1.6,
       'libraries/getCurrentLibraryName': () => 'Main',
+      // Programmatically mounted book cards render once before setEntity supplies their item.
+      // The real globals module always provides this getter, so keep the harness's store shape
+      // honest enough for that initial render instead of relying on Vue to swallow the error.
+      'globals/getLibraryItemCoverSrc': () => (_libraryItem, placeholderUrl) => placeholderUrl,
       'globals/getLocalMediaProgressById': (state) => (localLibraryItemId, episodeId) =>
         state.globals.localMediaProgress.find(
           (lmp) =>

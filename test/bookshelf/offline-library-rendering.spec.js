@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import LazyBookshelf from '@/components/bookshelf/LazyBookshelf.vue'
 import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush } from '../support/harness'
 
@@ -21,12 +21,11 @@ import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush } from '../sup
  * records an index only after `getElementById` succeeded, so the assertion cannot pass while the
  * row is missing - which is exactly the bug.
  *
- * **What these cannot assert, and why.** The card's own rendering. `mountEntityCard` builds each
- * card with `new ComponentClass()`, outside the test-utils tree, and `LazyBookCard`'s `store`
- * computed is `this.$store || this.$nuxt.$store`. A standalone instance has neither here, so its
- * render throws and `$el` is not an element - in the app `$nuxt` is on the Vue prototype and it
- * renders normally. Asserting on card DOM would therefore be asserting the harness's limits, so
- * these stop at the boundary the bug actually lived on.
+ * A card must also inherit the shelf's Vue/Vuex context. Offline storage resolves early enough that
+ * the first cards can be constructed before Nuxt's global `$nuxt` fallback is available. A
+ * standalone `new ComponentClass()` then has neither `$store` nor `$nuxt`, its render fails, and
+ * toggling list/grid appears to fix it only because the replacement cards are created later.
+ * These specs therefore assert the actual card DOM as well as the shelf-row boundary.
  */
 
 const localBook = (id, title) => ({
@@ -46,6 +45,7 @@ afterEach(() => {
   // document-wide id - so a leftover row from a previous test would satisfy them.
   while (mounted.length) mounted.pop().destroy()
   document.body.innerHTML = ''
+  vi.restoreAllMocks()
 })
 
 function mountLibrary({ user = null, networkConnected = false, localLibraryItems = [], responses = {} } = {}) {
@@ -96,7 +96,7 @@ describe('offline Library tab renders its downloads', () => {
   })
 
   it('creates a card component for each downloaded item', async () => {
-    const { wrapper } = mountLibrary({
+    const { wrapper, $store } = mountLibrary({
       localLibraryItems: [localBook('local-1', 'A'), localBook('local-2', 'B')]
     })
 
@@ -104,6 +104,62 @@ describe('offline Library tab renders its downloads', () => {
     await flush()
 
     expect(Object.keys(wrapper.vm.entityComponentRefs)).toEqual(['0', '1'])
+    expect(Object.values(wrapper.vm.entityComponentRefs).every((card) => card.$store === $store)).toBe(true)
+    expect(document.querySelectorAll('[id^="book-card-"]')).toHaveLength(2)
+  })
+
+  it('waits for the initial route layout before sizing list view and mounts all visible downloads', async () => {
+    let releaseLocalItems
+    const localItemsReady = new Promise((resolve) => {
+      releaseLocalItems = resolve
+    })
+    const books = Array.from({ length: 6 }, (_, index) => localBook(`local-${index + 1}`, `Book ${index + 1}`))
+    const db = fakeDb({ localLibraryItems: books })
+    const readLocalItems = db.getLocalLibraryItems
+    db.getLocalLibraryItems = async (...args) => {
+      await localItemsReady
+      return readLocalItems(...args)
+    }
+
+    const store = storeWith({ user: null, networkConnected: false, currentLibraryId: 'lib-1' })
+    store.state.globals.bookshelfListView = true
+
+    let renderedFrames = 0
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      renderedFrames++
+      callback(renderedFrames)
+      return renderedFrames
+    })
+
+    const result = mountComponent(LazyBookshelf, {
+      store,
+      db,
+      propsData: { page: 'books' },
+      attachTo: document.body
+    })
+    mounted.push(result.wrapper)
+
+    // Models the route transition seen in the app: the component is mounted, but its h-full
+    // container receives its usable dimensions on the following render frames. Measuring before
+    // those frames gives list cards a negative width and mounts only the two-row overscan window.
+    Object.defineProperty(result.wrapper.element, 'clientWidth', {
+      configurable: true,
+      get: () => (renderedFrames >= 2 ? 360 : 0)
+    })
+    Object.defineProperty(result.wrapper.element, 'clientHeight', {
+      configurable: true,
+      get: () => (renderedFrames >= 2 ? 640 : 0)
+    })
+
+    releaseLocalItems()
+    await flush()
+    await flush()
+
+    expect(result.wrapper.vm.bookshelfWidth).toBe(360)
+    expect(result.wrapper.vm.bookshelfHeight).toBe(640)
+    expect(result.wrapper.vm.entityWidth).toBe(344)
+    expect(result.wrapper.vm.entityIndexesMounted).toEqual([0, 1, 2, 3, 4, 5])
+    expect(document.querySelectorAll('[id^="book-card-"]')).toHaveLength(6)
   })
 
   it('mounts the shelf row before mounting cards into it', async () => {

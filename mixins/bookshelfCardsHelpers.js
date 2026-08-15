@@ -59,6 +59,10 @@ export default {
 
       // var _this = this
       var instance = new ComponentClass({
+        // Cards are created programmatically rather than by the shelf template. Give them the
+        // shelf as their parent so Vue/Nuxt injections (most importantly Vuex's $store) are
+        // available during their first render.
+        parent: this,
         propsData: props,
         created() {
           // this.$on('edit', (entity) => {
