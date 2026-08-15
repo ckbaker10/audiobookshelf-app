@@ -1,0 +1,50 @@
+name: Frontend tests
+
+# Component tests for the Vue/Nuxt half of the app. Separate from the Android job because it
+# shares nothing with it: no JDK, no Android SDK, no Capacitor step, and it runs in seconds.
+on:
+  push:
+    paths:
+      - 'components/**'
+      - 'pages/**'
+      - 'store/**'
+      - 'plugins/**'
+      - 'mixins/**'
+      - 'test/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vitest.config.js'
+      - '.github/workflows/frontend-tests.yml'
+  pull_request:
+    paths:
+      - 'components/**'
+      - 'pages/**'
+      - 'store/**'
+      - 'plugins/**'
+      - 'mixins/**'
+      - 'test/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'vitest.config.js'
+      - '.github/workflows/frontend-tests.yml'
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout sources
+        uses: actions/checkout@v3
+
+      - name: use Node.js 20.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: install dependencies
+        run: npm ci
+
+      # No `nuxt generate` and no Capacitor step: these are component tests that mount Vue
+      # components directly, so nothing here needs built web assets or a native project.
+      - name: run frontend tests
+        run: npm test
