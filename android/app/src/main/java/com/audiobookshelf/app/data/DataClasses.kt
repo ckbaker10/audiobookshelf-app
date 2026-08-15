@@ -236,7 +236,15 @@ class BookMetadata(
   var series:List<SeriesType>?
 ) : MediaTypeMetadata(title, explicit) {
   @JsonIgnore
-  override fun getAuthorDisplayName():String { return authorName ?: "Unknown" }
+  override fun getAuthorDisplayName():String {
+    // `authorName` is a flat convenience field the server only adds in its *minified* and
+    // *expanded* serializers. Its plain `toOldJSON()` shape sends the `authors` collection and no
+    // `authorName` at all, so reading only the flat field rendered every author as "Unknown" for
+    // those responses. Fall back to the collection, which is present in all three shapes.
+    if (!authorName.isNullOrBlank()) return authorName!!
+    val fromCollection = authors?.mapNotNull { it.name.takeIf { n -> n.isNotBlank() } }?.joinToString(", ")
+    return if (fromCollection.isNullOrBlank()) "Unknown" else fromCollection
+  }
 }
 
 @JsonIgnoreProperties(ignoreUnknown = true)

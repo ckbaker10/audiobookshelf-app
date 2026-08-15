@@ -214,21 +214,28 @@ data class DeviceSettings(
   @get:JsonIgnore
   val jumpForwardTimeMs
     get() = jumpForwardTime * 1000L
+  // A malformed or separator-less string (never persisted by this app, but not otherwise validated
+  // on the way in) must not crash the hour/minute lookup, and must not yield a value outside the
+  // clock either. `"0600".split(":")` is `["0600"]`, which parses cleanly to the *integer* 600 -
+  // so the range check below is doing real work, not defending against a parse failure. An
+  // out-of-clock hour is worse than a crash here: SleepTimerManager compares the current hour
+  // against this to decide whether it is inside the auto-timer window, and 600 never matches, so
+  // the auto sleep timer silently stops working with no error anywhere.
+  private fun timePart(time: String, index: Int, max: Int, fallback: Int): Int =
+          time.split(":").getOrNull(index)?.toIntOrNull()?.takeIf { it in 0..max } ?: fallback
+
   @get:JsonIgnore
   val autoSleepTimerStartHour
-    // A malformed or separator-less string (never persisted by this app, but not otherwise
-    // validated on the way in) must not crash the hour/minute lookup - fall back to the
-    // default("22:00") start/("06:00") end used when a device has no explicit setting yet.
-    get() = autoSleepTimerStartTime.split(":").getOrNull(0)?.toIntOrNull() ?: 22
+    get() = timePart(autoSleepTimerStartTime, 0, 23, 22)
   @get:JsonIgnore
   val autoSleepTimerStartMinute
-    get() = autoSleepTimerStartTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
+    get() = timePart(autoSleepTimerStartTime, 1, 59, 0)
   @get:JsonIgnore
   val autoSleepTimerEndHour
-    get() = autoSleepTimerEndTime.split(":").getOrNull(0)?.toIntOrNull() ?: 6
+    get() = timePart(autoSleepTimerEndTime, 0, 23, 6)
   @get:JsonIgnore
   val autoSleepTimerEndMinute
-    get() = autoSleepTimerEndTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
+    get() = timePart(autoSleepTimerEndTime, 1, 59, 0)
 
   @JsonIgnore
   fun getShakeThresholdGravity(): Float { // Used in ShakeDetector
