@@ -170,8 +170,26 @@ export function storeWith({
       setShowSideDrawer: (state, val) => {
         state.showSideDrawer = val
       },
+      setServerSettings: (state, settings) => {
+        state.user.serverSettings = settings
+      },
       'libraries/setCurrentLibrary': (state, id) => {
         state.libraries.currentLibraryId = id
+      },
+      'libraries/setEReaderDevices': (state, devices) => {
+        state.libraries.ereaderDevices = devices
+      },
+      // The three a successful authentication commits. Present so a spec can follow a login all
+      // the way to the redirect it ends with: Vuex rejects an unknown mutation type, so without
+      // them the flow dies partway and a "did not navigate" assertion passes for the wrong reason.
+      'user/setUser': (state, user) => {
+        state.user.user = user
+      },
+      'user/setAccessToken': (state, token) => {
+        state.user.accessToken = token
+      },
+      'user/setServerConnectionConfig': (state, config) => {
+        state.user.serverConnectionConfig = config
       }
     }
   })
@@ -186,7 +204,12 @@ export function storeWith({
  * is the only way to exercise those handlers without a server.
  */
 export function fakeSocket() {
-  return fakeEventBus()
+  const bus = fakeEventBus()
+  const connections = []
+  // `connect` is what a successful authentication calls to open the session's socket. Recorded
+  // rather than absent, so a spec can follow a login through to its end without the missing
+  // method throwing halfway.
+  return { ...bus, connections, connect: (address, token) => connections.push({ address, token }) }
 }
 
 /**
@@ -335,6 +358,8 @@ export function mountComponent(
       $router,
       $route,
       $showHideBookshelfToolbar: () => {},
+      // Returns nothing in production too, so a no-op is faithful rather than an invented value.
+      $setServerLanguageCode: () => {},
       $setBookshelfScrollPosition: () => {},
       $getBookshelfScrollPosition: () => 0,
       $hapticsImpact: async () => {},
@@ -346,7 +371,20 @@ export function mountComponent(
       $formatDate: (d) => String(d),
       // Mirrors plugins/i18n.js: returns the key so assertions stay independent of en-us.json,
       // and substitutes positionally when subs are supplied.
-      $getString: (key, subs) => (Array.isArray(subs) && subs.length ? `${key}:${subs.join(',')}` : key)
+      $getString: (key, subs) => (Array.isArray(subs) && subs.length ? `${key}:${subs.join(',')}` : key),
+      // Mirrors plugins/init.client.js's isValidVersion rather than answering a constant.
+      // Components branch on it to decide whether a server speaks the new JWT auth, so a stub
+      // pinned to true or false would pick those branches on the test's behalf.
+      $isValidVersion: (currentVersion, minVersion) => {
+        if (!currentVersion || !minVersion) return false
+        const currentParts = currentVersion.split('.').map(Number)
+        const minParts = minVersion.split('.').map(Number)
+        for (let i = 0; i < minParts.length; i++) {
+          if (currentParts[i] > minParts[i]) return true
+          if (currentParts[i] < minParts[i]) return false
+        }
+        return true
+      }
     }
   })
 
