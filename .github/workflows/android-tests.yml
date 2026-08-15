@@ -33,12 +33,20 @@ jobs:
       - name: install dependencies
         run: npm ci
 
-      # `cap update`, not `cap sync`. Gradle cannot configure without
+      # Gradle cannot configure without
       # android/capacitor-cordova-android-plugins/cordova.variables.gradle, which is generated
-      # rather than committed. `cap sync` is `cap copy` + `cap update`, and it is the `copy` half
-      # that requires ./dist and fails here with "Could not find the web assets directory" - a
-      # Kotlin unit test run has no use for the built web assets, so building them with
-      # `npm run generate` just to satisfy that check would add minutes for nothing.
+      # rather than committed, so a Capacitor step is unavoidable even for a Kotlin-only run.
+      #
+      # Capacitor runs its `copy` step as part of `update` and aborts if webDir (./dist) is
+      # missing. ./dist is gitignored and produced by `npm run generate` - a full Nuxt build,
+      # minutes long, whose output no Kotlin unit test ever reads. A placeholder satisfies the
+      # check at no cost. The APK build in build-apk.yml does a real `npm run generate`, so
+      # nothing shippable is ever built from this stub.
+      - name: stub web assets for Capacitor
+        run: |
+          mkdir -p dist
+          echo '<!doctype html><meta charset="utf-8"><title>unit tests</title>' > dist/index.html
+
       - name: generate Capacitor native config
         run: npx cap update android
 
