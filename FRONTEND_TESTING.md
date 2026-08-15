@@ -14,7 +14,7 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**255 tests, 0 failures.** The fix queue is empty.
+**263 tests, 0 failures.** The fix queue is empty.
 
 That is the target, not a permanent state: a newly found defect *should* make this number non-zero
 until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
@@ -23,6 +23,13 @@ Every one of the 29 failures this suite was built around has been fixed and the 
 with their assertions untouched — five reported upstream issues (#542, #1711/#1712, #1335, #1274,
 #1870) and five defects found by scanning, including a transient-refresh logout that was the
 JavaScript twin of Android #1908/#1900/#1901.
+
+One of those fixes then produced a regression the suite could not see, because the spec covered
+only the component that was changed: #1335 stopped "Switch Server/User" from logging out, and
+`ServerConnectForm`'s untouched auto-connect re-authenticated the surviving session and redirected
+to the shelf, so the switch looked inert. `navigation/switch-server-connection-screen.spec.js`
+covers the arrival side. When a fix moves a responsibility between components, the spec has to
+follow it there.
 
 If you change the suite, re-run it and update this number from the run.
 
