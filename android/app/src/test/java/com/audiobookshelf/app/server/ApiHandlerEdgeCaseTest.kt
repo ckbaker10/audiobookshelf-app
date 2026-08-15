@@ -3,6 +3,7 @@ package com.audiobookshelf.app.server
 import com.audiobookshelf.app.data.ServerConnectionConfig
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.models.User
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -16,6 +17,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -24,12 +26,13 @@ import org.junit.Test
  * never fires reads as a hang, and one that fires twice can double-write local state.
  */
 class ApiHandlerEdgeCaseTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var server: MockWebServer
   private lateinit var handler: ApiHandler
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     server = MockWebServer()
     server.start()
     DeviceManager.serverConnectionConfig =
@@ -45,7 +48,6 @@ class ApiHandlerEdgeCaseTest {
     server.shutdown()
     // Otherwise DeviceManager.serverConnectionConfig keeps pointing at this now-shut-down
     // MockWebServer instance for whichever test class the shared JVM runs next.
-    AbsTestEnvironment.reset()
   }
 
   private fun getCurrentUserOnce(): Pair<User?, Int> {

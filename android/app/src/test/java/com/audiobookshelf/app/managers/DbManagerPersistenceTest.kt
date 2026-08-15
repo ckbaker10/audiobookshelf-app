@@ -17,31 +17,22 @@ import com.audiobookshelf.app.data.audioTrack
 import com.audiobookshelf.app.data.book
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.plugins.AbsLog
-import com.audiobookshelf.app.support.AbsTestEnvironment
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class DbManagerPersistenceTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
-  }
-
-  /**
-   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
-   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
-   * whichever class runs next.
-   */
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   @Test

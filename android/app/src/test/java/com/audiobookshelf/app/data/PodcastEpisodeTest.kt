@@ -1,6 +1,7 @@
 package com.audiobookshelf.app.data
 
 import android.content.Context
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
@@ -10,6 +11,7 @@ import java.util.Date
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -27,11 +29,12 @@ import org.junit.Test
  * the false-green shape `TESTING.md` §8 warns about.
  */
 class PodcastEpisodeTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private val ctx: Context = mockk(relaxed = true)
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockUriParse()
     mockkStatic(android.icu.text.DateFormat::class)
     val formatter = mockk<android.icu.text.DateFormat>()
@@ -42,7 +45,6 @@ class PodcastEpisodeTest {
   @After
   fun tearDown() {
     unmockkAll()
-    AbsTestEnvironment.reset()
   }
 
   private fun episode(publishedAt: Long? = null, localEpisodeId: String? = null) =

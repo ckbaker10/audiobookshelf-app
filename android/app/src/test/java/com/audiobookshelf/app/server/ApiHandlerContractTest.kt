@@ -12,6 +12,7 @@ import com.audiobookshelf.app.data.playbackSession
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.media.MediaProgressSyncData
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockkStatic
@@ -28,6 +29,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -37,12 +39,13 @@ import org.junit.Test
  * else in the app exercises these paths against a real HTTP server.
  */
 class ApiHandlerContractTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var server: MockWebServer
   private lateinit var handler: ApiHandler
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     server = MockWebServer()
     server.start()
     DeviceManager.serverConnectionConfig =
@@ -67,7 +70,6 @@ class ApiHandlerContractTest {
     server.shutdown()
     // Otherwise DeviceManager.serverConnectionConfig keeps pointing at this now-shut-down
     // MockWebServer instance for whichever test class the shared JVM runs next.
-    AbsTestEnvironment.reset()
   }
 
   private fun takeRequest(): RecordedRequest =

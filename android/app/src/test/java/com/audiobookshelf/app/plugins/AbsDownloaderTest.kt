@@ -20,6 +20,7 @@ import com.audiobookshelf.app.managers.DownloadItemManager
 import com.audiobookshelf.app.models.DownloadItem
 import com.audiobookshelf.app.server.ApiHandler
 import com.audiobookshelf.app.services.DownloadServiceHost
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
@@ -37,6 +38,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -52,6 +54,8 @@ import org.junit.Test
  * entry matching `media.coverPath` - see the "cover part defaults to a zero file size" tests below.
  */
 class AbsDownloaderTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var plugin: AbsDownloader
   private lateinit var mainActivity: MainActivity
   private lateinit var apiHandler: ApiHandler
@@ -61,7 +65,6 @@ class AbsDownloaderTest {
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockLocalFileStatics()
     dir = Files.createTempDirectory("abs-downloader-test").toFile()
     DeviceManager.serverConnectionConfig = ServerConnectionConfig(
@@ -92,7 +95,6 @@ class AbsDownloaderTest {
     unmockkObject(DownloadServiceHost)
     unmockkAll()
     dir.deleteRecursively()
-    AbsTestEnvironment.reset()
   }
 
   private fun callFor(libraryItemId: String, episodeId: String? = null, localFolderId: String = ""): PluginCall {

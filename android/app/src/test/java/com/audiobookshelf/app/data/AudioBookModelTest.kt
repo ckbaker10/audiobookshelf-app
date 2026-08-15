@@ -71,6 +71,57 @@ class AudioBookModelTest {
     )
   }
 
+  /**
+   * Inputs:   a `BookMetadata` with a populated `authors` collection and no flat `authorName`.
+   *
+   * Expected: the author's name. The collection is the field the server always sends.
+   *
+   * Observed: `"Unknown"`. `getAuthorDisplayName()` reads `authorName ?: "Unknown"` and never looks
+   *           at `authors` (`DataClasses.kt:238`).
+   *
+   * Path:     `BookMetadata.getAuthorDisplayName` -> `LibraryItem.authorName` -> every Android Auto
+   *           browse label and media description. `authorName` is a flat convenience field the
+   *           server adds only in its *minified* and *expanded* serializers; the plain
+   *           `toOldJSON()` shape sends the `authors` collection and no `authorName` at all, so
+   *           every author renders as "Unknown" for those responses.
+   *
+   * Found by `GoldenResponseFixtureTest` against a real audiobookshelf 2.36.0 response body - the
+   * exact class of defect a hand-written fixture cannot surface, because a hand-written fixture is
+   * written to match the model.
+   */
+  @Test
+  fun `author display name falls back to the authors collection when the flat field is absent`() {
+    val metadata = bookMetadata().apply { authors = mutableListOf(Author("aut-1", "Terry Goodkind", null)) }
+
+    assertEquals("Terry Goodkind", metadata.getAuthorDisplayName())
+  }
+
+  @Test
+  fun `author display name joins multiple authors from the collection`() {
+    val metadata =
+            bookMetadata().apply {
+              authors = mutableListOf(Author("aut-1", "Jane Doe", null), Author("aut-2", "John Roe", null))
+            }
+
+    assertEquals("Jane Doe, John Roe", metadata.getAuthorDisplayName())
+  }
+
+  @Test
+  fun `the flat author name still wins when the server provided it`() {
+    val metadata =
+            bookMetadata().apply {
+              authorName = "Flat Name"
+              authors = mutableListOf(Author("aut-1", "Collection Name", null))
+            }
+
+    assertEquals("Flat Name", metadata.getAuthorDisplayName())
+  }
+
+  @Test
+  fun `author display name is Unknown when neither the flat field nor the collection has a name`() {
+    assertEquals("Unknown", bookMetadata().apply { authors = mutableListOf() }.getAuthorDisplayName())
+  }
+
   @Test
   fun `media progress ids distinguish books and episodes`() {
     assertEquals("book", serverProgress("book", null).mediaItemId)

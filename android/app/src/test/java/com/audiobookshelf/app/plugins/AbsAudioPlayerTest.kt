@@ -10,6 +10,7 @@ import com.audiobookshelf.app.data.book
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.player.PlayerNotificationService
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
@@ -23,6 +24,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -53,13 +55,14 @@ import org.junit.Test
  * `playerNotificationService` is a public `lateinit var` and is assigned directly.
  */
 class AbsAudioPlayerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var plugin: AbsAudioPlayer
   private lateinit var pns: PlayerNotificationService
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockLocalFileStatics()
     db = DbManager()
     pns = mockk(relaxed = true)
@@ -72,7 +75,6 @@ class AbsAudioPlayerTest {
   @After
   fun tearDown() {
     unmockkAll()
-    AbsTestEnvironment.reset()
   }
 
   /** A relaxed `PluginCall` whose two-arg getters return the given params, else their default. */

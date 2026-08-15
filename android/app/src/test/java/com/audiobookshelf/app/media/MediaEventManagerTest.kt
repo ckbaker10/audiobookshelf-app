@@ -6,23 +6,24 @@ import com.audiobookshelf.app.data.MediaTypeMetadata
 import com.audiobookshelf.app.data.PlaybackSession
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.player.PlayerNotificationService
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class MediaEventManagerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
   }
 
@@ -38,16 +39,6 @@ class MediaEventManagerTest {
                   100.0, 3, 1L, 2L, 0L, mutableListOf(), 10.0, null, null, null, "server",
                   "https://x", "exo-player"
           )
-
-  /**
-   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
-   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
-   * whichever class runs next.
-   */
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
-  }
 
   @Test
   fun `first playback event creates media item history for the session`() {

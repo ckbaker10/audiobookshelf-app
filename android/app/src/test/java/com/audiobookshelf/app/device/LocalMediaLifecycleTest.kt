@@ -9,6 +9,7 @@ import com.audiobookshelf.app.data.book
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.models.DownloadItem
 import com.audiobookshelf.app.models.DownloadItemPart
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.mockk
 import io.mockk.unmockkAll
@@ -21,6 +22,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -42,13 +44,14 @@ import org.junit.Test
  * internal-storage identity rule is characterized here and the SAF rule is not asserted.
  */
 class LocalMediaLifecycleTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var dir: File
   private lateinit var scanner: FolderScanner
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockLocalFileStatics()
     dir = Files.createTempDirectory("abs-lifecycle-test").toFile()
     scanner = FolderScanner(AbsTestEnvironment.mockContext())
@@ -59,7 +62,6 @@ class LocalMediaLifecycleTest {
   fun tearDown() {
     unmockkAll()
     dir.deleteRecursively()
-    AbsTestEnvironment.reset()
   }
 
   private fun audioTrack(index: Int, duration: Double = 60.0) =
@@ -115,9 +117,9 @@ class LocalMediaLifecycleTest {
     val track = File(dir, "t.mp3").apply { writeBytes(ByteArray(2048)) }
     val parts = arrayOf(part("p1", "t.mp3", track.absolutePath, audioTrack = audioTrack(1)))
 
-    val first = scanSync(downloadItem(parts = *parts))!!
+    val first = scanSync(downloadItem(parts = parts))!!
     db.saveLocalLibraryItem(first.localLibraryItem)
-    val second = scanSync(downloadItem(parts = *parts))!!
+    val second = scanSync(downloadItem(parts = parts))!!
     db.saveLocalLibraryItem(second.localLibraryItem)
 
     assertEquals("local_li-1", first.localLibraryItem.id)
@@ -132,9 +134,9 @@ class LocalMediaLifecycleTest {
     val track = File(dir, "t.mp3").apply { writeBytes(ByteArray(2048)) }
     val parts = arrayOf(part("p1", "t.mp3", track.absolutePath, audioTrack = audioTrack(1)))
 
-    val first = scanSync(downloadItem(parts = *parts))!!
+    val first = scanSync(downloadItem(parts = parts))!!
     db.saveLocalLibraryItem(first.localLibraryItem)
-    val second = scanSync(downloadItem(parts = *parts))!!
+    val second = scanSync(downloadItem(parts = parts))!!
 
     assertEquals(1, second.localLibraryItem.localFiles.size)
     assertEquals(1, (second.localLibraryItem.media as Book).tracks?.size)
@@ -160,9 +162,9 @@ class LocalMediaLifecycleTest {
     val track = File(dir, "t.mp3").apply { writeBytes(ByteArray(2048)) }
     val parts = arrayOf(part("p1", "t.mp3", track.absolutePath, audioTrack = audioTrack(1)))
 
-    val fromServerA = scanSync(downloadItem(serverConnectionConfigId = "srv-a", parts = *parts))!!
+    val fromServerA = scanSync(downloadItem(serverConnectionConfigId = "srv-a", parts = parts))!!
     db.saveLocalLibraryItem(fromServerA.localLibraryItem)
-    val fromServerB = scanSync(downloadItem(serverConnectionConfigId = "srv-b", parts = *parts))!!
+    val fromServerB = scanSync(downloadItem(serverConnectionConfigId = "srv-b", parts = parts))!!
     db.saveLocalLibraryItem(fromServerB.localLibraryItem)
 
     assertEquals(fromServerA.localLibraryItem.id, fromServerB.localLibraryItem.id)

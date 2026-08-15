@@ -13,6 +13,7 @@ import com.audiobookshelf.app.data.book
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.models.DownloadItem
 import com.audiobookshelf.app.models.DownloadItemPart
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.mockk
 import io.mockk.unmockkAll
@@ -26,6 +27,7 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -42,13 +44,14 @@ import org.junit.Test
  * below.
  */
 class FolderScannerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var dir: File
   private lateinit var scanner: FolderScanner
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockLocalFileStatics()
     dir = Files.createTempDirectory("abs-folderscanner-test").toFile()
     scanner = FolderScanner(AbsTestEnvironment.mockContext())
@@ -59,7 +62,6 @@ class FolderScannerTest {
   fun tearDown() {
     unmockkAll()
     dir.deleteRecursively()
-    AbsTestEnvironment.reset()
   }
 
   private fun part(

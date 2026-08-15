@@ -171,6 +171,23 @@ class LargeMediaBoundsTest {
     assertEquals(1, session.getNextTrackIndex())
   }
 
+  /**
+   * Inputs:   a two-track session with `currentTime = -5.0` - the state left by a bad seek, or by a
+   *           session restored against a re-scanned item.
+   *
+   * Expected: the first track. A position before the book starts is at its beginning.
+   *
+   * Observed: the **last** track (index 1). `getCurrentTrackIndex`'s loop matches nothing, and its
+   *           fallthrough returns `audioTracks.size - 1` unconditionally - correct for a position
+   *           past the end, wrong for one before the start (`PlaybackSession.kt:110`).
+   *
+   * Path:     `getCurrentTrackIndex` -> `getCurrentTrackEndTime`/`getCurrentTrackTimeMs` and
+   *           `PlayerNotificationService`'s window index. Note `getNextTrackIndex` answers `0` for
+   *           the same input, so the two disagree about where the listener is.
+   *
+   * Previously asserted as `getCurrentTrackIndex() in 0..1`, which admitted both answers and hid
+   * this; the name always claimed the first track.
+   */
   @Test
   fun `a negative current time still selects the first track`() {
     val session =
@@ -180,7 +197,9 @@ class LargeMediaBoundsTest {
             )
 
     assertEquals(0, session.getNextTrackIndex())
-    assertTrue(session.getCurrentTrackIndex() in 0..1)
+    // `in 0..1` here would admit either track and leave the name ("selects the first track")
+    // overclaiming what the assertion checks.
+    assertEquals(0, session.getCurrentTrackIndex())
   }
 
   /**
@@ -224,13 +243,18 @@ class LargeMediaBoundsTest {
     val session = playbackSession(mutableListOf())
 
     var thrown: Throwable? = null
+    var endTime: Long? = null
     try {
-      session.getCurrentTrackEndTime()
+      endTime = session.getCurrentTrackEndTime()
     } catch (e: Throwable) {
       thrown = e
     }
 
     assertNull("an empty track list must not throw out of a queue-navigation helper", thrown)
+    // "did not throw" and "returned something a caller can use" are different contracts, and only
+    // the second one keeps the queue navigator correct - a helper that returned a negative end
+    // time without throwing would still be wrong.
+    assertEquals("a session with no tracks has no playable time", 0L, endTime)
   }
 
   @Test

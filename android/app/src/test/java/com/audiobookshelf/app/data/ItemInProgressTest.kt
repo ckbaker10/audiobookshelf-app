@@ -36,16 +36,14 @@ class ItemInProgressTest {
     assertEquals("ep1", itemInProgress.episode?.id)
   }
 
-  @Test
+  /**
+   * Documents the current contract: `progressLastUpdate` is mandatory, and its absence throws out
+   * of the parse rather than defaulting. `getAllItemsInProgress` maps every element through this,
+   * so one malformed element fails the whole shelf - see the sibling spec below for that.
+   */
+  @Test(expected = JSONException::class)
   fun `makeFromServerObject throws when progressLastUpdate is missing`() {
-    val json = baseLibraryItemJson()
-
-    try {
-      ItemInProgress.makeFromServerObject(json, mapper)
-      assertTrue("Expected a JSONException for the missing field", false)
-    } catch (e: JSONException) {
-      // Documents the current contract: progressLastUpdate is mandatory.
-    }
+    ItemInProgress.makeFromServerObject(baseLibraryItemJson(), mapper)
   }
 
   private fun baseLibraryItemJson(): JSONObject {

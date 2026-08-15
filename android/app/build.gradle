@@ -163,6 +163,10 @@ jacoco {
 }
 
 tasks.register('jacocoDebugUnitTestReport', JacocoReport) {
+  // The suite is green, so this dependency is honest again and the report is always built from
+  // the run that just happened. It used to be routinely bypassed with `-x testDebugUnitTest`,
+  // because the suite failed by design - which silently produced a report from whatever stale
+  // .exec file was left on disk, with no warning that the numbers were old.
   dependsOn 'testDebugUnitTest'
 
   reports {

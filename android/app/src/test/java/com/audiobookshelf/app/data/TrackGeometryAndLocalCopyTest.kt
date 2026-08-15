@@ -5,7 +5,12 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-class MiscCoverageTest {
+/**
+ * Track and chapter millisecond geometry, plus the `getLocalCopy()` semantics both media types
+ * share. Previously `MiscCoverageTest`, which said nothing about its contents - a name that
+ * survives deleting the assertions is a name that is not doing any work (TESTING.md, conventions).
+ */
+class TrackGeometryAndLocalCopyTest {
   @Test
   fun `collection book count reflects list size or zero when absent`() {
     val withBooks = LibraryCollection("collection", "library", "Name", null, mutableListOf(libraryItem(), libraryItem()))
@@ -31,6 +36,18 @@ class MiscCoverageTest {
     assertEquals("sub/f.mp3", withMetadata.relPath)
   }
 
+  /**
+   * Characterization, deliberately not a contract. A negative `duration` yields
+   * `endOffsetMs < startOffsetMs`, which breaks the ordering every track-index search in
+   * `PlaybackSession` relies on (`getCurrentTrackIndex` walks tracks comparing against
+   * `startOffset`/`endOffset`).
+   *
+   * It is pinned rather than enabled as a failure because no production path is known to *produce*
+   * a negative duration: `AudioTrack.duration` comes from the server's probe data or from a local
+   * scan, and both report a non-negative number. Per TESTING.md rule 7, a failing spec against an
+   * unreachable input is worse than none. If a source of negative durations is ever found, this is
+   * the spec to convert - the arithmetic is already wrong, only the reachability is missing.
+   */
   @Test
   fun `negative audio track duration produces an end offset before the start`() {
     val track = audioTrack(startOffset = 5.0, duration = -2.0)

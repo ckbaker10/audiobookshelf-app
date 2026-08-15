@@ -9,6 +9,7 @@ import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.managers.SecureStorage
 import com.audiobookshelf.app.data.LocalMediaProgress
 import com.audiobookshelf.app.server.ApiHandler
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.getcapacitor.JSArray
 import com.getcapacitor.JSObject
@@ -25,6 +26,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -47,12 +49,13 @@ import org.junit.Test
  * `call.resolve()`. Stubbing only the one-arg forms silently does nothing.
  */
 class AbsDatabaseTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
   private lateinit var plugin: AbsDatabase
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     // setCurrentServerConnectionConfig computes a new config's id via DeviceManager.getBase64Id,
     // which needs Base64.encodeToString stubbed (see TESTING.md §6.1 - this is the
     // static mock that goes inert if tests are added here) - harmless for the other tests.
@@ -64,7 +67,6 @@ class AbsDatabaseTest {
   @After
   fun tearDown() {
     io.mockk.unmockkAll()
-    AbsTestEnvironment.reset()
   }
 
   /** A relaxed `PluginCall` whose two-arg `getString` returns the given params, else its default. */

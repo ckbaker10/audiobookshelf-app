@@ -1,12 +1,12 @@
 package com.audiobookshelf.app.data
 
 import com.audiobookshelf.app.managers.DbManager
-import com.audiobookshelf.app.support.AbsTestEnvironment
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -45,17 +45,13 @@ import org.junit.Test
  * visible change rather than a silent one.
  */
 class ProgressConflictTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
-  }
-
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   /** A stored record 90 s into a 100 s book, last written at t=9,000,000. */
@@ -67,8 +63,12 @@ class ProgressConflictTest {
             lastUpdate = 9_000_000L
           }
 
-  /** A playback session carrying an older `updatedAt` than the stored record above. */
-  private fun staleSession(currentTime: Double = 5.0, updatedAt: Long = 1_000L) =
+  /**
+   * A playback session with an explicit `updatedAt`. Defaults to one *older* than
+   * [newerStoredProgress], which is the stale-delivery case most specs here need; the guard specs
+   * pass a newer `updatedAt` to prove a legitimate update still wins.
+   */
+  private fun session(currentTime: Double = 5.0, updatedAt: Long = 1_000L) =
           playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = currentTime)
                   .apply { this.updatedAt = updatedAt }
 
@@ -90,7 +90,7 @@ class ProgressConflictTest {
   fun `a playback session older than the stored record must not overwrite its position`() {
     val stored = newerStoredProgress()
 
-    stored.updateFromPlaybackSession(staleSession())
+    stored.updateFromPlaybackSession(session())
 
     assertEquals(
             "a session from t=1000 must not replace a position recorded at t=9000000",
@@ -115,7 +115,7 @@ class ProgressConflictTest {
   fun `a stale playback session must not move lastUpdate backwards`() {
     val stored = newerStoredProgress()
 
-    stored.updateFromPlaybackSession(staleSession())
+    stored.updateFromPlaybackSession(session())
 
     assertTrue(
             "lastUpdate went backwards to ${stored.lastUpdate}, poisoning every later " +
@@ -140,8 +140,8 @@ class ProgressConflictTest {
   fun `a duplicate session redelivered out of order must not undo a newer one`() {
     val stored = newerStoredProgress()
 
-    stored.updateFromPlaybackSession(staleSession(currentTime = 95.0, updatedAt = 9_500_000L))
-    stored.updateFromPlaybackSession(staleSession(currentTime = 5.0, updatedAt = 1_000L))
+    stored.updateFromPlaybackSession(session(currentTime = 95.0, updatedAt = 9_500_000L))
+    stored.updateFromPlaybackSession(session(currentTime = 5.0, updatedAt = 1_000L))
 
     assertEquals(
             "a redelivered older session must not undo the newer position already applied",
@@ -173,7 +173,7 @@ class ProgressConflictTest {
   @Test
   fun `a progress fraction beyond the media duration must not reach durable storage`() {
     val stored = newerStoredProgress()
-    val beyondDuration = staleSession(currentTime = 500.0, updatedAt = 10_000_000L)
+    val beyondDuration = session(currentTime = 500.0, updatedAt = 10_000_000L)
 
     stored.updateFromPlaybackSession(beyondDuration)
     db.saveLocalMediaProgress(stored)
@@ -228,7 +228,7 @@ class ProgressConflictTest {
   fun `a newer playback session does update the stored position`() {
     val stored = newerStoredProgress()
 
-    stored.updateFromPlaybackSession(staleSession(currentTime = 95.0, updatedAt = 9_500_000L))
+    stored.updateFromPlaybackSession(session(currentTime = 95.0, updatedAt = 9_500_000L))
 
     assertEquals(95.0, stored.currentTime, 0.0)
     assertEquals(9_500_000L, stored.lastUpdate)
@@ -238,7 +238,7 @@ class ProgressConflictTest {
   @Test
   fun `applying the same session twice is idempotent`() {
     val stored = newerStoredProgress()
-    val session = staleSession(currentTime = 95.0, updatedAt = 9_500_000L)
+    val session = session(currentTime = 95.0, updatedAt = 9_500_000L)
 
     stored.updateFromPlaybackSession(session)
     val firstPass = Triple(stored.currentTime, stored.progress, stored.lastUpdate)
