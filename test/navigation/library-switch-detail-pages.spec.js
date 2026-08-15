@@ -72,16 +72,20 @@ describe('#1711/#1712 detail pages must leave when the library changes', () => {
       wrapper.destroy()
     })
 
-    it('does not keep showing a collection from the library that was left', async () => {
-      // Stated separately from the routing assertion because "went somewhere" and "is no longer
-      // presenting stale content" are different contracts, and a fix could satisfy one without
-      // the other - e.g. routing away while leaving the component alive in a keep-alive cache.
+    it('marks itself as leaving so nothing repopulates it on the way out', async () => {
+      // Stated separately from the routing assertion because "went somewhere" and "stopped
+      // accepting content for the old library" are different contracts, and a fix could satisfy
+      // one without the other.
+      //
+      // Asserted on the leaving flag rather than on `collection` being null: routing is
+      // asynchronous, so the page re-renders at least once before it unmounts, and a template
+      // built around `collection.books` would throw if the object were cleared.
       const { wrapper, $eventBus } = mountCollection()
 
       $eventBus.$emit('library-changed', 'lib-2')
       await flush()
 
-      expect(wrapper.vm.collection?.libraryId).not.toBe('lib-1')
+      expect(wrapper.vm.leavingLibrary).toBe(true)
       wrapper.destroy()
     })
 
@@ -126,7 +130,7 @@ describe('#1711/#1712 detail pages must leave when the library changes', () => {
       $socket.$emit('playlist_updated', { id: 'pl-1', libraryId: 'lib-1', name: 'Renamed', items: [] })
       await flush()
 
-      expect(wrapper.vm.playlist?.name).not.toBe('Renamed')
+      expect(wrapper.vm.playlist?.name).toBe('My Playlist')
       wrapper.destroy()
     })
   })
