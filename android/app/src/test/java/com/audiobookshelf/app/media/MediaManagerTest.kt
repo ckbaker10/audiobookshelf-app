@@ -13,6 +13,8 @@ import com.audiobookshelf.app.data.audioTrack
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.managers.DbManager
+import com.audiobookshelf.app.support.AbsSingletonRule
+import com.audiobookshelf.app.support.MockServerRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
@@ -30,33 +32,36 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class MediaManagerTest {
-  private lateinit var server: MockWebServer
+  private val mockServer = MockServerRule()
+
+  /**
+   * Chained, not two `@get:Rule` fields: JUnit gives no ordering guarantee between rule fields on
+   * one class, and the singleton reset has to wrap the server rule or it would null the config the
+   * server rule just installed.
+   */
+  @get:Rule val rules = MockServerRule.chainedWith(mockServer)
+
+  private val server: MockWebServer
+    get() = mockServer.server
+
   private lateinit var mediaManager: MediaManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     // loadAuthorBooksWithAudio/loadAuthorSeriesBooksWithAudio/loadPodcastEpisodeMediaBrowserItems
     // (added below) transitively need Base64.encodeToString (ApiHandler's author/series filter
     // query params) and Uri.parse (cover URI resolution), both null-stubbed by the mockable
     // android.jar - see TESTING.md §6 (the mockable-jar known-null list).
     AbsTestEnvironment.mockLocalFileStatics()
-    server = MockWebServer()
-    server.start()
-    DeviceManager.serverConnectionConfig =
-            ServerConnectionConfig(
-                    "test-server", 0, "Test", server.url("/").toString().trimEnd('/'),
-                    "2.17.0", "user-1", "username", "test-token", null
-            )
     mediaManager = MediaManager(AbsTestEnvironment.apiHandler(), AbsTestEnvironment.mockContext())
   }
 
   @After
   fun tearDown() {
-    server.shutdown()
     io.mockk.unmockkAll()
   }
 

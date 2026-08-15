@@ -3,11 +3,13 @@ package com.audiobookshelf.app.data
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.player.PLAYMETHOD_DIRECTPLAY
 import com.audiobookshelf.app.player.PLAYMETHOD_TRANSCODE
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -16,16 +18,16 @@ import org.junit.Test
  * touching `DeviceManager`.
  */
 class PlaybackSessionServerVersionTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockUriParse()
   }
 
   @After
   fun tearDown() {
     io.mockk.unmockkAll()
-    AbsTestEnvironment.reset()
   }
 
   private fun session(playMethod: Int) =

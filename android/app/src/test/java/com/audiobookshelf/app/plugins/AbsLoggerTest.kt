@@ -1,36 +1,27 @@
 package com.audiobookshelf.app.plugins
 
 import com.audiobookshelf.app.managers.DbManager
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.slot
 import io.mockk.verify
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class AbsLoggerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
-  }
-
-  /**
-   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
-   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
-   * whichever class runs next.
-   */
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   @Test

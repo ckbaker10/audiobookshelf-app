@@ -49,6 +49,11 @@ object AbsTestEnvironment {
   fun reset() {
     val dir = File(System.getProperty("java.io.tmpdir"), "abs-test-${System.nanoTime()}")
     dir.mkdirs()
+    // One directory per call, and reset() is called from both @Before and @After of ~30
+    // classes, so a full run creates on the order of 800 of them. Paper holds the directory
+    // open for the life of the book, so it cannot be deleted eagerly here - registering it
+    // for deletion at JVM exit is what keeps the system temp dir from growing every run.
+    dir.deleteOnExit()
     val ctx = mockk<Context>(relaxed = true)
     every { ctx.filesDir } returns dir
     every { ctx.applicationContext } returns ctx
@@ -176,15 +181,28 @@ object AbsTestEnvironment {
    * bare `mockk(relaxed = true)` (used by `IconsTest`/`BrowseTreeTest`) which is fine for "was a
    * URI built" assertions but returns empty strings for any assertion on the URI's actual value.
    * Call `unmockkStatic(Uri::class)` (or `unmockkAll()`) in `@After` to undo it.
+   *
+   * `scheme` and `path` are derived only for an absolute `scheme://authority/path` input, which is
+   * every URI this app builds. For anything else - a bare relative path, a `mailto:`-style opaque
+   * URI - both return `null`, matching `android.net.Uri`. An earlier version derived them by
+   * unconditional string surgery, so `Uri.parse("cover.jpg").scheme` confidently returned the whole
+   * string `"cover.jpg"`; a wrong answer is worse than no answer, because a test asserting on it
+   * would have been green for the wrong reason.
    */
   fun mockUriParse() {
     mockkStatic(Uri::class)
     every { Uri.parse(any()) } answers {
       val s = firstArg<String>()
       val u = mockk<Uri>(relaxed = true)
+      val separator = s.indexOf("://")
       every { u.toString() } returns s
-      every { u.scheme } returns s.substringBefore(':')
-      every { u.path } returns s.substringAfter("://").substringAfter('/').let { "/$it" }
+      every { u.scheme } returns if (separator > 0) s.substring(0, separator) else null
+      every { u.path } returns
+              if (separator > 0) {
+                val afterAuthority = s.substring(separator + 3)
+                val slash = afterAuthority.indexOf('/')
+                if (slash >= 0) afterAuthority.substring(slash) else "/"
+              } else null
       u
     }
     every { Uri.fromFile(any()) } answers {

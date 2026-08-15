@@ -3,6 +3,7 @@ package com.audiobookshelf.app.server
 import com.audiobookshelf.app.data.ServerConnectionConfig
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.managers.SecureStorage
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
@@ -16,6 +17,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -36,13 +38,14 @@ import org.junit.Test
  * with `SecureStorage` mocked so a stored refresh token exists to be found.
  */
 class ApiHandlerCredentialTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var server: MockWebServer
   private lateinit var handler: ApiHandler
   private lateinit var secureStorage: SecureStorage
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     server = MockWebServer()
     server.start()
     setActiveConfig(server.url("/").toString().trimEnd('/'))
@@ -54,7 +57,6 @@ class ApiHandlerCredentialTest {
   @After
   fun tearDown() {
     server.shutdown()
-    AbsTestEnvironment.reset()
   }
 
   private fun setActiveConfig(address: String) {
@@ -152,6 +154,44 @@ class ApiHandlerCredentialTest {
 
     assertCredentialsIntact("a 401 with no refresh token")
     assertEquals(1, server.requestCount)
+  }
+
+  /**
+   * 403 is not 401. The server answers 403 for a permissions problem on an otherwise valid token
+   * (a library the user may not read), so it must never take the refresh-and-logout path - the
+   * user would be signed out for opening the wrong shelf.
+   */
+  @Test
+  fun `a 403 leaves the stored credentials untouched and does not attempt a refresh`() {
+    every { secureStorage.getRefreshToken(any()) } returns "refresh-token"
+    server.enqueue(MockResponse().setResponseCode(403))
+
+    getCurrentUserOnce()
+
+    assertCredentialsIntact("a 403")
+    assertEquals("403 must not trigger the refresh flow", 1, server.requestCount)
+  }
+
+  /**
+   * A refresh that answers 200 with a body the client cannot read is not a successful refresh. It
+   * must be treated as a failure rather than leaving the session in a half-updated state where the
+   * old access token was discarded and no new one was stored.
+   */
+  @Test
+  fun `a refresh answering 200 with an unreadable body does not report success`() {
+    every { secureStorage.getRefreshToken(any()) } returns "refresh-token"
+    server.enqueue(MockResponse().setResponseCode(401))
+    server.enqueue(MockResponse().setResponseCode(200).setBody("{not json"))
+
+    getCurrentUserOnce()
+
+    // Either outcome is defensible for the *session* (the refresh token may or may not still be
+    // good), but the access token must never be replaced by something that was never parsed.
+    val token = DeviceManager.serverConnectionConfig?.token
+    assertTrue(
+            "the access token must be either preserved or cleared, never set from an unparsed body, got $token",
+            token == null || token == "test-token"
+    )
   }
 
   // --- Refresh failures: the reported defect ---------------------------------------------------

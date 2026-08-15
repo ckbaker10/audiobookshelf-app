@@ -4,13 +4,13 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -32,13 +32,14 @@ import org.junit.Test
  * .SDK_INT`, which is a real field read and returns `0` under the mockable `android.jar`.
  */
 class ConnectivityClassificationTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var ctx: Context
   private lateinit var connectivityManager: ConnectivityManager
   private lateinit var capabilities: NetworkCapabilities
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     ctx = mockk(relaxed = true)
     connectivityManager = mockk(relaxed = true)
     capabilities = mockk(relaxed = true)
@@ -47,11 +48,6 @@ class ConnectivityClassificationTest {
     every { connectivityManager.getNetworkCapabilities(any()) } returns capabilities
     every { capabilities.hasTransport(any()) } returns false
     every { capabilities.hasCapability(any()) } returns false
-  }
-
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   private fun withTransport(transport: Int) {
@@ -222,6 +218,49 @@ class ConnectivityClassificationTest {
             "a carrier walled garden is not a usable connection just because the radio is up",
             DeviceManager.checkConnectivity(ctx)
     )
+  }
+
+  /**
+   * **The negative half of the VPN case, and the reason the spec above is not sufficient alone.**
+   *
+   * The obvious way to satisfy "a VPN must not read as offline" is to append `TRANSPORT_VPN` to
+   * the transport list. That fix passes every other spec in this class while classifying a tunnel
+   * that reaches nothing as a working connection - a VPN whose underlying network has dropped, or
+   * one still negotiating. Requiring a capability rather than trusting the transport is what makes
+   * the two VPN specs satisfiable together.
+   */
+  @Test
+  fun `a VPN advertising neither internet nor validation is offline`() {
+    withTransport(NetworkCapabilities.TRANSPORT_VPN)
+    // Deliberately no NET_CAPABILITY_INTERNET and no NET_CAPABILITY_VALIDATED.
+
+    assertFalse(
+            "a tunnel that advertises no internet at all is not a usable connection",
+            DeviceManager.checkConnectivity(ctx)
+    )
+  }
+
+  /** The fully-working VPN, so the positive half is pinned symmetrically with the transports. */
+  @Test
+  fun `a validated VPN counts as connected`() {
+    withTransport(NetworkCapabilities.TRANSPORT_VPN)
+    withWorkingInternet()
+
+    assertTrue(DeviceManager.checkConnectivity(ctx))
+  }
+
+  /**
+   * The other null the platform can hand back. `getNetworkCapabilities(null)` is covered above via
+   * a null capabilities object; this covers `activeNetwork` itself being null, which is what the
+   * system reports in airplane mode and while a network is being torn down. Production passes that
+   * null straight into `getNetworkCapabilities`, so the two nulls reach different lines.
+   */
+  @Test
+  fun `a null active network is offline`() {
+    every { connectivityManager.activeNetwork } returns null
+    every { connectivityManager.getNetworkCapabilities(null) } returns null
+
+    assertFalse(DeviceManager.checkConnectivity(ctx))
   }
 
   /**

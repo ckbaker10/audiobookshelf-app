@@ -65,8 +65,8 @@ Android SDK Platform 35 with Build-Tools 35.0.0, and `ANDROID_HOME` set.
 ```bash
 ./android/gradlew :app:testDebugUnitTest -p android --no-daemon --rerun
 
-# Coverage. The test task fails by design, so run the report separately.
-./android/gradlew :app:jacocoDebugUnitTestReport -p android --no-daemon -x testDebugUnitTest
+# Coverage. Depends on the test task, so it always reports on a fresh run.
+./android/gradlew :app:jacocoDebugUnitTestReport -p android --no-daemon
 ```
 
 One suite: `--tests "com.audiobookshelf.app.data.ProgressConflictTest"`.
@@ -86,25 +86,29 @@ Test-only build settings in `android/app/build.gradle`, each load-bearing:
 
 ## 3. Current state
 
-497 tests, **46 enabled failures**, 3,225 / 7,977 lines (**40.4%**).
+**560 tests, 7 enabled failures.**
 
-| Package | Lines | Note |
-| --- | ---: | --- |
-| `models` | 93/93 (100%) | Complete. |
-| `server` | 412/556 (74.1%) | All 24 `ApiHandler` endpoints; remainder is the keystore-bound refresh-success path. |
-| `data` | 823/1,142 (72.1%) | Domain models. Best-covered large package. |
-| `device` | 197/323 (61.0%) | Remainder is `FolderScanner`'s SAF half. |
-| `media` | 489/933 (52.4%) | `MediaEventManager` 100%; `MediaManager` is the largest reachable gap. |
-| `plugins` | 536/1,026 (52.2%) | Remainder is `AbsFileSystem` (SAF) and `AbsAudioPlayer`'s `Handler` bodies. |
-| `managers` | 441/983 (44.9%) | `InternalDownloadManager` 29/29, `DbManager` 175/185; remainder is `SleepTimerManager`/`SecureStorage`. |
-| `player` | 232/2,643 (8.8%) | `PlayerNotificationService` (1,242) and `CastPlayer` (519) dominate and are blocked. |
-| `services` | 2/123 (1.6%) | Foreground service; blocked. |
-| root `app` | 0/155 (0%) | Activity/widget; blocked. |
+The failure count is the fix queue, not a defect in the suite (§1 rule 3). All seven belong to
+three model guards listed in §7.1; they go green when that fix branch lands and are red here on
+purpose until it does.
 
-**The percentage is not a quality gate.** Ratchet per-package thresholds if you want
-a gate; a global number mostly measures how much Android-bound code exists.
+For a long stretch this section read "497 tests, 46 enabled failures" while the suite actually had
+503 and 50, and §7.1 listed sixteen remediations that had all already shipped. If you change the
+suite, re-run it and update this section from the run - a reader arriving cold uses these numbers
+to decide whether the tree is healthy.
 
----
+Coverage is reported by:
+
+```bash
+./android/gradlew :app:jacocoDebugUnitTestReport -p android --no-daemon
+```
+
+The report task depends on the test task, so the numbers always come from the run that just
+happened. (It used to be invoked with `-x testDebugUnitTest` to dodge a suite that failed by
+design, which silently produced a report from whatever stale `.exec` file was on disk.)
+
+**The percentage is not a quality gate.** Ratchet per-package thresholds if you want a gate; a
+global number mostly measures how much Android-bound code exists.
 
 ## 4. Suite map
 
@@ -114,7 +118,7 @@ a gate; a global number mostly measures how much Android-bound code exists.
 | `data/LargeMediaBoundsTest` | Large/invalid media bounds, track and chapter indices |
 | `data/CoverImageTest` | The reported cover-image crash, reader side |
 | `data/PlaybackSessionTest`, `PlaybackSessionExtraTest`, `PlaybackSessionServerVersionTest` | Session timing, progress, server-version URI gating |
-| `data/AudioBookModelTest`, `DeviceAndMediaTypeTest`, `ProgressAndCollectionTest`, `LocalLibraryItemTest`, `LocalMediaProgressExtraTest`, `PodcastEpisodeTest`, `ItemInProgressTest`, `LibraryHierarchyTest`, `MiscCoverageTest`, `LocalFileAndDeviceSettingsTest` | Domain models and edge inputs |
+| `data/AudioBookModelTest`, `DeviceAndMediaTypeTest`, `ProgressAndCollectionTest`, `LocalLibraryItemTest`, `LocalMediaProgressExtraTest`, `PodcastEpisodeTest`, `ItemInProgressTest`, `LibraryHierarchyTest`, `TrackGeometryAndLocalCopyTest`, `LocalFileAndDeviceSettingsTest` | Domain models and edge inputs |
 | `device/ConnectivityClassificationTest` | Connectivity state: VPN, captive portal |
 | `device/LocalMediaLifecycleTest` | Scan identity, orphaned local items |
 | `device/FolderScannerTest` | Internal-storage scan, cover adoption, re-download behaviour |
@@ -134,9 +138,21 @@ a gate; a global number mostly measures how much Android-bound code exists.
 | `plugins/AbsAudioPlayerTest` | The plugin surface reachable without `Handler` dispatch |
 | `plugins/AbsDownloaderTest`, `AbsLoggerTest` | Download-manifest builder, logging |
 | `server/ServerApiContractTest` | App/server request contract |
+| `server/GoldenResponseFixtureTest` | Real server response bodies vs. the client's models — see below |
+| `data/ModelDeserializationTest` | Jackson tolerance: unknown fields, int-vs-double, absent optionals, subtype deduction |
 | `server/ApiHandlerCredentialTest` | Credential preservation across transient failures |
 | `server/ApiHandlerContractTest`, `ApiHandlerEdgeCaseTest` | Endpoint shapes, failure paths, callback cardinality |
 | `support/AbsTestEnvironment` | The shared harness — §5 |
+| `support/AbsSingletonRule`, `MockServerRule` | Lifecycle rules — §5 |
+
+**Golden fixtures.** `GoldenResponseFixtureTest` reads bodies from
+`src/test/resources/fixtures/server-<version>/`, derived from the audiobookshelf server's own
+serializers at that version and carrying every field it emits — including the ones the client does
+not model. Everything else server-shaped in this suite is hand-written inside the test that uses
+it, which makes those tests blind to the server changing a serializer: a fixture written to match
+the model cannot disagree with it. Adding a server version means adding a directory and an entry in
+`serverVersions`; keep the old directories, since they are what prove backward compatibility.
+Provenance and a refresh recipe are in that directory's `README.md`.
 
 ---
 
@@ -155,7 +171,8 @@ next `NullPointerException`.
 | `withStaticField(cls, name, value) {}` | Scoped override of a `public static final` field. Needed for `Build.MANUFACTURER`/`MODEL`, which the mockable jar nulls. `mockkStatic` cannot help — a field read compiles to `getstatic`, not a method call, so there is nothing to intercept. Always use the scoped form; an unrestored override leaks into every later test class. |
 | `withSdkInt(n) {}` | `Build.VERSION.SDK_INT` reads **0** by default, which silently pins every untouched test to whichever branch guards `< 28`. |
 | `apiHandler(ctx)` | An `ApiHandler` wired to a mock `Context`; construction alone exercises `SecureStorage`. |
-| `withMockServer {}` | `MockWebServer` plus `DeviceManager.serverConnectionConfig`, torn down automatically. Underused — see §7.3. |
+| `withMockServer {}` | Scoped `MockWebServer` for one block inside one test. For a server that lasts the whole class, use `MockServerRule` instead. |
+| `RecordingDownloadCallback` | Records `InternalDownloadManager` progress/completion. Atomic counters and a second latch rather than a `Thread.sleep`, so a duplicate completion is actually detected instead of merely usually detected. |
 
 The harness registers a JCA provider named `AndroidKeyStore` backed by JKS, because
 `SecureStorage`'s property initializer calls `KeyStore.getInstance("AndroidKeyStore")`
@@ -246,40 +263,39 @@ do this.
 
 ## 7. Known remediations
 
-### 7.1 Production fixes, ordered by specs-freed over effort
+### 7.1 Production fixes — the open queue
 
-Each turns the listed enabled failures green. **These belong in their own change,
-separate from the tests** — a test that moves with the code it tests proves nothing.
-Line numbers are indicative; confirm against current source before editing.
+**These belong in their own change, separate from the tests** — a test that moves with the code it
+tests proves nothing. Line numbers are indicative; confirm against current source before editing.
+
+Three model guards, seven enabled failures:
 
 | # | Fix | Where | Frees |
 | --- | --- | --- | ---: |
-| 1 | Guard the write: `if (playbackSession.updatedAt <= lastUpdate) return`. Today `currentTime`, `progress` and `lastUpdate` are assigned unconditionally, so a stale session overwrites newer data *and drags `lastUpdate` backwards*, poisoning every later server reconciliation that compares on it. | `LocalMediaProgress.updateFromPlaybackSession` | 3 |
-| 2 | Clamp: `(currentTime / getTotalDuration()).coerceIn(0.0, 1.0)`, plus a NaN guard for zero duration. An unclamped `5.0` both persists and flips `isFinished` via `>= 0.99`. | `PlaybackSession.progress` | 3 |
-| 3 | `(audioTracks.size - 1).coerceAtLeast(0)` in both index helpers, and guard the three callers that index with the result. An empty track list yields **-1**, and `audioTracks[-1]` throws out of a queue-navigation helper. Sibling `getTrackStartOffsetMs` already guards exactly this. | `PlaybackSession.getCurrentTrackIndex` / `getNextTrackIndex` | 3 |
-| 4 | Add the missing `else` branch resolving with an error when the local item is not found, and make `it.media as Podcast` a safe cast. Today a missing record resolves **zero** times, so the JS promise stays pending forever; an episode id sent for a book throws `ClassCastException`. | `AbsAudioPlayer.prepareLibraryItem` | 2 |
-| 5 | Treat a 401 from `/auth/refresh` as terminal and **IO or 5xx as retryable**. The server returns 401 specifically for an invalid refresh token, so the client can distinguish them. Also reorder `handleRefreshFailure`: it nulls the connection config before reading the id it needs, so `removeRefreshToken` is never actually reached. | `ApiHandler.handleTokenRefresh`, `handleRefreshFailure` | 2 |
-| 6 | Add `TRANSPORT_VPN`, and require `NET_CAPABILITY_INTERNET` / `VALIDATED` rather than transport alone. A VPN reads as offline; a captive portal reads as online. | `DeviceManager.checkConnectivity` | 2 |
-| 7 | Validate when `expectedSize <= 0` — at minimum reject a `Content-Encoding` other than `identity`, and a `Content-Type` that cannot be the requested file. There is currently **no** integrity check on that path, so an HTML error page and a gzip stream are both accepted as the file. `fileSize = 0` is the production default for cover parts. | `InternalDownloadManager` | 2 |
-| 8 | Compare `lastUpdate` before applying, as the sibling caller `ApiHandler.syncLocalMediaProgressForUser` already does. | `AbsDatabase.syncServerMediaProgressWithLocalMediaProgress` | 1 |
-| 9 | Pass `progress >= 0.99` instead of a hard-coded `false`. A book finished on first listen, with no prior record, persists as *not finished*; the existing-record branch gets this right, so the two branches disagree. | `PlaybackSession.getNewLocalMediaProgress` | 1 |
-| 10 | Do not move `currentTime` backwards. A delayed external pause rewinds an already-saved later position; nothing serialises the media session, the player listener and the 15-second timer against each other. | `PlaybackSession.syncData` | 1 |
-| 11 | Add a `length() > 0` check. The only guard today is `File.exists()`, and a zero-byte cover exists. Root cause of the reported cover-image crash. | `FolderScanner.createLocalFile` | 1 |
-| 12 | Remove or flag an item once `checkHasTracks()` is false. A server-linked item that has lost every file is written back emptied and stays selectable in the library and the Android Auto tree. The information needed is already computed. | `DbManager.cleanLocalLibraryItems` | 1 |
-| 13 | Percent-encode the query. An enabled spec demonstrates query-parameter injection; apply the same reserved-character matrix to ids and filters. | `ApiHandler.getSearchResults` | 1 |
-| 14 | Propagate `ServerConnectionConfig.customHeaders`. They are configured, stored, and never sent, by either JSON requests or downloads. Matters behind reverse proxies and identity-aware gateways. | `ApiHandler`, `InternalDownloadManager` | 1 |
-| 15 | Catch deserialization failure and invoke the callback with an error. Valid JSON of an unexpected shape currently drops the callback entirely, which reads as a hang. | `ApiHandler.makeRequest` | 1 |
-| 16 | Guard the cover-resolution chain at its four call sites (`LocalLibraryItem.getMediaDescription` / `getCoverUri`, `PlaybackSession.resolveCoverBitmapAsync` / `getCoverUri`). One missing guard; a fix must also still invoke `onArtResolved`, or the crash becomes a spinner that never clears. | `LocalLibraryItem`, `PlaybackSession` | 5 |
+| 1 | Range-check the parsed hour/minute (`takeIf { it in 0..23 }` / `0..59`) before returning it. `"0600".split(":")` is `["0600"]`, which parses to the *integer* 600, so the existing `?:` fallback never fires — there is nothing to fall back from. `SleepTimerManager` then compares the current hour against 600, never matches, and the auto sleep timer silently stops working. | `DeviceSettings.autoSleepTimer*Hour` / `*Minute` | 3 |
+| 2 | Fall back to the `authors` collection when the flat `authorName` is absent. That field is a convenience the server adds only in its *minified* and *expanded* serializers; the plain `toOldJSON()` shape sends `authors` and no `authorName`, so every author renders as "Unknown". | `BookMetadata.getAuthorDisplayName` | 3 |
+| 3 | Return the *first* track when the position is before the first track's start. The fallthrough returns `size - 1` unconditionally, which is right for a position past the end and wrong for one before the start — and `getNextTrackIndex` answers `0` for the same input, so the two disagree. | `PlaybackSession.getCurrentTrackIndex` | 1 |
 
-Smaller model fixes, one spec each: initialize an absent track collection in
-`Book.addAudioTrack`; accept tracks when a podcast's episode list is null; normalize
-case, whitespace and parameters in audio-MIME and ebook-format detection (2); guard
-malformed sleep-timer strings (2); stop book progress matching an episode on the same
-library item; tolerate empty series metadata and a missing author collection; stop
-force-casting every collection item to `Book`; keep progress percentages within
-0–100; reject a negative download-queue limit. Four `MediaManager` cache and filter
-defects — including one that caches under a key its own lookup never reads, so every
-call re-fetches — are documented in that suite's KDoc.
+#### What the previous queue bought
+
+The sixteen remediations this section used to list are all shipped. They were written as enabled
+failing specs first, fixed on separate branches, and every one went green **with its assertion
+untouched** — which is the whole point of rule 3 and the reason to keep working this way. Between
+them they closed the progress-conflict cluster, the download-integrity cluster, the auth/transient
+-HTTP cluster, connectivity classification, the cover-image crash, and the orphaned-local-item
+end state.
+
+Two of the three fixes now in the queue were found the same way, by an audit that *tightened
+existing assertions* rather than by adding new subjects:
+
+* the negative track index was hidden behind `assertTrue(index in 0..1)`, which admitted both
+  answers while the test's name claimed the first track;
+* the sleep-timer hour was hidden behind an expectation of `0` for the *minute*, a value that
+  happened to equal the fallback default and so could not distinguish a parse from a fallback.
+
+The third was found by `GoldenResponseFixtureTest` (§4) against a real server body — the class of
+defect a hand-written fixture cannot surface, because a hand-written fixture is written to match
+the model.
 
 ### 7.2 Characterized on purpose — do not "fix" without a decision
 
@@ -309,17 +325,32 @@ These tests pin current behaviour so that changing it is visible. Each has a rea
 
 ### 7.3 Test-infrastructure work
 
+Open:
+
 1. **Add `Settings.Secure.getString` to `mockLocalFileStatics()`.** It blocks
    `sendSyncLocalSessions` and everything that calls it. One `mockkStatic` line.
-2. **Defuse the `AbsDatabaseTest` fragility (§6.1).** Cheapest useful step,
-   independent of root cause: assert in `@Before` that the `Base64` stub is live, so
-   the failure is immediate and legible instead of a timeout somewhere unrelated.
-   Better: stop depending on a static mock inside a `GlobalScope` coroutine.
-3. **Extract a shared base class or JUnit `@Rule`** for the `reset()` in
-   `@Before`/`@After` pair. It has been re-derived by hand repeatedly.
-4. **Adopt or drop `withMockServer`.** The harness's headline helper is barely used;
-   both `ApiHandler` suites re-implement it inline.
-5. `reset()` returns a `File` no caller uses.
+2. **Defuse the `AbsDatabaseTest` fragility (§6.1).** Cheapest useful step, independent of root
+   cause: assert in `@Before` that the `Base64` stub is live, so the failure is immediate and
+   legible instead of a timeout somewhere unrelated. Better: stop depending on a static mock inside
+   a `GlobalScope` coroutine.
+3. **Measure `forkEvery`.** Gradle runs the whole suite in one JVM, and that single fact is the
+   root cause of `reset()`, the Paper `mBookMap` reflection hack, the `withStaticField` scoping
+   rule, and the `PlayerListener` companion resets. `unitTests.all { forkEvery = 1 }` would delete
+   cross-class leakage as a category; it is a wall-time decision, so measure before deciding.
+
+Done — recorded because the reasoning is still load-bearing:
+
+* **A `@Rule` replaced the hand-copied `reset()` pair.** `AbsSingletonRule` (§5) is now the only
+  way the suite resets singleton state. The pair had been re-derived by hand in ~30 classes and
+  **four had got it wrong**, resetting on the way in but not on the way out. `MediaManagerTest` was
+  the worst: it pointed `DeviceManager.serverConnectionConfig` at a `MockWebServer` and then shut
+  that server down, leaving the global singleton aimed at a dead socket for whichever class ran
+  next. That is invisible at the point of the mistake and fails somewhere unrelated, which is
+  exactly why it is now structural rather than conventional.
+* **`withMockServer` was adopted rather than dropped**, and joined by `MockServerRule` (§5) for the
+  class-scoped case the seven hand-rolling suites actually needed.
+* **`reset()` no longer leaks a temp directory per call** (it created ~800 per run) and no longer
+  returns an unused `File`.
 
 ---
 
@@ -359,10 +390,11 @@ Ranked by user impact, not by uncovered line count.
    control state, download destination, the Android Auto browse tree, startup state.
    All need a policy object extracted from a service or plugin before there is
    anything host-testable. Blocked on a refactor decision, not on technique.
-3. **Response-shape drift.** `ServerApiContractTest` pins the request shapes the
-   client emits, but responses are hand-written fixtures, so they stay green after
-   the server changes a serializer, a field type or a status. Server-produced golden
-   fixtures are the known answer.
+3. **Response-shape drift — partly closed.** `GoldenResponseFixtureTest` now pins the five
+   highest-traffic payloads against bodies derived from the server's own serializers, and it
+   immediately found one defect (`getAuthorDisplayName`, §7.1). The remaining exposure is the
+   endpoints it does not yet cover — search results, personalized shelves, collections, playback
+   sessions — and the fact that the fixtures track one server version at a time.
 4. **`MediaManager`** — the largest *reachable* gap left.
 5. **Transport policy is triplicated.** The Nuxt Axios client, the Capacitor HTTP
    client and native OkHttp each implement auth, refresh, retry and parsing

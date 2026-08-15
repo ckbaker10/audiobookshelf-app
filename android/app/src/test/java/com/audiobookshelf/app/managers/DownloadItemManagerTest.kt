@@ -8,6 +8,7 @@ import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.device.FolderScanner
 import com.audiobookshelf.app.models.DownloadItem
 import com.audiobookshelf.app.models.DownloadItemPart
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
@@ -21,6 +22,7 @@ import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -40,6 +42,8 @@ import org.junit.Test
  * leaves a live polling loop running for the rest of the test JVM's life.
  */
 class DownloadItemManagerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var folderScanner: FolderScanner
   private lateinit var emitter: DownloadItemManager.DownloadEventEmitter
   private lateinit var mgr: DownloadItemManager
@@ -47,7 +51,6 @@ class DownloadItemManagerTest {
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     // IncompleteDownloadCleanup.schedule/cancel reach WorkManager.getInstance(context), which
     // throws IllegalStateException on a host JVM (WorkManager is never initialized here). Any
     // path touching a terminally-failed item's retry, restore, or the manager's own init{} block

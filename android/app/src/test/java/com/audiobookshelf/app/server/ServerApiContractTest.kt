@@ -7,9 +7,9 @@ import com.audiobookshelf.app.data.audioTrack
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.data.playbackSession
 import com.audiobookshelf.app.device.DeviceManager
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.getcapacitor.JSObject
-import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -21,6 +21,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -39,12 +40,13 @@ import org.junit.Test
  * responses here are minimal stubs.
  */
 class ServerApiContractTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var server: MockWebServer
   private lateinit var handler: ApiHandler
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     server = MockWebServer()
     server.start()
     config = ServerConnectionConfig(
@@ -58,7 +60,6 @@ class ServerApiContractTest {
   @After
   fun tearDown() {
     server.shutdown()
-    AbsTestEnvironment.reset()
   }
 
   private lateinit var config: ServerConnectionConfig
@@ -71,11 +72,14 @@ class ServerApiContractTest {
    * different contract (and `ApiHandlerEdgeCaseTest` records that a body which fails to
    * deserialize drops the callback entirely). Waiting on the callback here would couple every
    * route assertion to a hand-written response fixture for its return type.
+   *
+   * [action] therefore takes no latch. It used to be handed a `CountDownLatch` that this method
+   * created and never awaited, so all twenty-one `latch.countDown()` calls were ceremony implying
+   * a synchronisation that was not happening. `takeRequest`'s own timeout is the real wait.
    */
-  private fun requestFor(body: String = "{}", action: (CountDownLatch) -> Unit): RecordedRequest {
+  private fun requestFor(body: String = "{}", action: () -> Unit): RecordedRequest {
     server.enqueue(MockResponse().setResponseCode(200).setBody(body))
-    val latch = CountDownLatch(1)
-    action(latch)
+    action()
     val request = server.takeRequest(5, TimeUnit.SECONDS)
     assertTrue("no request reached the server", request != null)
     return request!!
@@ -91,8 +95,8 @@ class ServerApiContractTest {
   /** Server: `get /me` — `server/routers/ApiRouter.js`. */
   @Test
   fun `getCurrentUser calls GET api me`() {
-    val request = requestFor("""{"id":"u1","username":"n","mediaProgress":[]}""") { latch ->
-      handler.getCurrentUser { latch.countDown() }
+    val request = requestFor("""{"id":"u1","username":"n","mediaProgress":[]}""") {
+      handler.getCurrentUser {}
     }
 
     assertRoute(request, "GET", "/api/me")
@@ -101,8 +105,8 @@ class ServerApiContractTest {
   /** Server: `get /libraries` — `server/routers/ApiRouter.js`. */
   @Test
   fun `getLibraries calls GET api libraries`() {
-    val request = requestFor("""{"libraries":[]}""") { latch ->
-      handler.getLibraries { latch.countDown() }
+    val request = requestFor("""{"libraries":[]}""") {
+      handler.getLibraries {}
     }
 
     // include=stats is appended by the client; the route itself is what is being pinned.
@@ -112,8 +116,8 @@ class ServerApiContractTest {
   /** Server: `get /libraries/:id/personalized`. */
   @Test
   fun `getLibraryPersonalized calls GET api libraries id personalized`() {
-    val request = requestFor("""{"value":[]}""") { latch ->
-      handler.getLibraryPersonalized("lib-1") { latch.countDown() }
+    val request = requestFor("""{"value":[]}""") {
+      handler.getLibraryPersonalized("lib-1") {}
     }
 
     assertRoute(request, "GET", "/api/libraries/lib-1/personalized")
@@ -122,8 +126,8 @@ class ServerApiContractTest {
   /** Server: `get /libraries/:id/items`. */
   @Test
   fun `getLibraryItems calls GET api libraries id items with a large limit`() {
-    val request = requestFor("""{"results":[]}""") { latch ->
-      handler.getLibraryItems("lib-1") { latch.countDown() }
+    val request = requestFor("""{"results":[]}""") {
+      handler.getLibraryItems("lib-1") {}
     }
 
     assertEquals("GET", request.method)
@@ -136,8 +140,8 @@ class ServerApiContractTest {
   /** Server: `get /libraries/:id/search`. */
   @Test
   fun `getSearchResults calls GET api libraries id search with an encoded query`() {
-    val request = requestFor("""{"book":[]}""") { latch ->
-      handler.getSearchResults("lib-1", "dune") { latch.countDown() }
+    val request = requestFor("""{"book":[]}""") {
+      handler.getSearchResults("lib-1", "dune") {}
     }
 
     assertEquals("GET", request.method)
@@ -150,8 +154,8 @@ class ServerApiContractTest {
   /** Server: `get /me/items-in-progress`. */
   @Test
   fun `getAllItemsInProgress calls GET api me items-in-progress`() {
-    val request = requestFor("""{"libraryItems":[]}""") { latch ->
-      handler.getAllItemsInProgress { latch.countDown() }
+    val request = requestFor("""{"libraryItems":[]}""") {
+      handler.getAllItemsInProgress {}
     }
 
     assertRoute(request, "GET", "/api/me/items-in-progress")
@@ -160,8 +164,8 @@ class ServerApiContractTest {
   /** Server: `get /items/:id`. */
   @Test
   fun `getLibraryItem calls GET api items id`() {
-    val request = requestFor("""{"id":"li-1","mediaType":"book"}""") { latch ->
-      handler.getLibraryItem("li-1") { latch.countDown() }
+    val request = requestFor("""{"id":"li-1","mediaType":"book"}""") {
+      handler.getLibraryItem("li-1") {}
     }
 
     // expanded=1 is the client's own query flag; the route is what is being pinned.
@@ -173,10 +177,8 @@ class ServerApiContractTest {
   /** Server: `post /items/:id/play` and `post /items/:id/play/:episodeId`. */
   @Test
   fun `playLibraryItem posts to api items id play`() {
-    val request = requestFor("""{"id":"s1"}""") { latch ->
-      handler.playLibraryItem("li-1", null, PlayItemRequestPayload("android", false, false, com.audiobookshelf.app.data.DeviceInfo("d", "maker", "model", 35, "test"))) {
-        latch.countDown()
-      }
+    val request = requestFor("""{"id":"s1"}""") {
+      handler.playLibraryItem("li-1", null, PlayItemRequestPayload("android", false, false, com.audiobookshelf.app.data.DeviceInfo("d", "maker", "model", 35, "test"))) {}
     }
 
     assertRoute(request, "POST", "/api/items/li-1/play")
@@ -184,10 +186,8 @@ class ServerApiContractTest {
 
   @Test
   fun `playLibraryItem for a podcast episode appends the episode id to the play route`() {
-    val request = requestFor("""{"id":"s1"}""") { latch ->
-      handler.playLibraryItem("li-1", "ep-1", PlayItemRequestPayload("android", false, false, com.audiobookshelf.app.data.DeviceInfo("d", "maker", "model", 35, "test"))) {
-        latch.countDown()
-      }
+    val request = requestFor("""{"id":"s1"}""") {
+      handler.playLibraryItem("li-1", "ep-1", PlayItemRequestPayload("android", false, false, com.audiobookshelf.app.data.DeviceInfo("d", "maker", "model", 35, "test"))) {}
     }
 
     assertRoute(request, "POST", "/api/items/li-1/play/ep-1")
@@ -196,10 +196,8 @@ class ServerApiContractTest {
   /** Server: `post /session/:id/sync`. */
   @Test
   fun `sendProgressSync posts to api session id sync`() {
-    val request = requestFor { latch ->
-      handler.sendProgressSync("session-1", MediaProgressSyncData(15, 100.0, 42.0)) { _, _ ->
-        latch.countDown()
-      }
+    val request = requestFor {
+      handler.sendProgressSync("session-1", MediaProgressSyncData(15, 100.0, 42.0)) { _, _ -> }
     }
 
     assertRoute(request, "POST", "/api/session/session-1/sync")
@@ -213,8 +211,8 @@ class ServerApiContractTest {
   fun `sendLocalProgressSync posts to api session local`() {
     val session = playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = 12.0)
             .apply { localLibraryItem = localLibraryItem(id = "local-1") }
-    val request = requestFor { latch ->
-      handler.sendLocalProgressSync(session) { _, _ -> latch.countDown() }
+    val request = requestFor {
+      handler.sendLocalProgressSync(session) { _, _ -> }
     }
 
     assertRoute(request, "POST", "/api/session/local")
@@ -241,8 +239,8 @@ class ServerApiContractTest {
     val request =
             AbsTestEnvironment.withStaticField(android.os.Build::class.java, "MANUFACTURER", "TestCo") {
               AbsTestEnvironment.withStaticField(android.os.Build::class.java, "MODEL", "TestPhone") {
-                requestFor("""{"results":[]}""") { latch ->
-                  handler.sendSyncLocalSessions(listOf(playbackSession())) { _, _ -> latch.countDown() }
+                requestFor("""{"results":[]}""") {
+                  handler.sendSyncLocalSessions(listOf(playbackSession())) { _, _ -> }
                 }
               }
             }
@@ -254,10 +252,8 @@ class ServerApiContractTest {
   /** Server: `patch /me/progress/:libraryItemId/:episodeId?`. */
   @Test
   fun `updateMediaProgress patches api me progress with the library item id`() {
-    val request = requestFor { latch ->
-      handler.updateMediaProgress("li-1", null, JSObject().put("currentTime", 5.0)) {
-        latch.countDown()
-      }
+    val request = requestFor {
+      handler.updateMediaProgress("li-1", null, JSObject().put("currentTime", 5.0)) {}
     }
 
     assertRoute(request, "PATCH", "/api/me/progress/li-1")
@@ -265,10 +261,8 @@ class ServerApiContractTest {
 
   @Test
   fun `updateMediaProgress for an episode appends the episode id, matching the optional path param`() {
-    val request = requestFor { latch ->
-      handler.updateMediaProgress("li-1", "ep-1", JSObject().put("currentTime", 5.0)) {
-        latch.countDown()
-      }
+    val request = requestFor {
+      handler.updateMediaProgress("li-1", "ep-1", JSObject().put("currentTime", 5.0)) {}
     }
 
     assertRoute(request, "PATCH", "/api/me/progress/li-1/ep-1")
@@ -277,8 +271,8 @@ class ServerApiContractTest {
   /** Server: `get /me/progress/:id/:episodeId?`. */
   @Test
   fun `getMediaProgress calls GET api me progress id`() {
-    val request = requestFor("""{"id":"mp","libraryItemId":"li-1","duration":100.0,"progress":0.1,"currentTime":10.0,"isFinished":false,"lastUpdate":1,"startedAt":0}""") { latch ->
-      handler.getMediaProgress("li-1", null, config) { latch.countDown() }
+    val request = requestFor("""{"id":"mp","libraryItemId":"li-1","duration":100.0,"progress":0.1,"currentTime":10.0,"isFinished":false,"lastUpdate":1,"startedAt":0}""") {
+      handler.getMediaProgress("li-1", null, config) {}
     }
 
     assertRoute(request, "GET", "/api/me/progress/li-1")
@@ -287,8 +281,8 @@ class ServerApiContractTest {
   /** Server: `post /session/:id/close`. */
   @Test
   fun `closePlaybackSession posts to api session id close`() {
-    val request = requestFor { latch ->
-      handler.closePlaybackSession("session-1", config) { latch.countDown() }
+    val request = requestFor {
+      handler.closePlaybackSession("session-1", config) {}
     }
 
     assertRoute(request, "POST", "/api/session/session-1/close")
@@ -297,8 +291,8 @@ class ServerApiContractTest {
   /** Server: `get /session/:id` (`get /sessions/:id` is the admin route; the app uses the singular). */
   @Test
   fun `getPlaybackSession calls GET api session id`() {
-    val request = requestFor("""{"id":"session-1","mediaType":"book","duration":1.0,"playMethod":0,"startedAt":0,"updatedAt":0,"timeListening":0,"audioTracks":[],"currentTime":0.0,"chapters":[],"mediaMetadata":{"title":"t"},"deviceInfo":{}}""") { latch ->
-      handler.getPlaybackSession("session-1") { latch.countDown() }
+    val request = requestFor("""{"id":"session-1","mediaType":"book","duration":1.0,"playMethod":0,"startedAt":0,"updatedAt":0,"timeListening":0,"audioTracks":[],"currentTime":0.0,"chapters":[],"mediaMetadata":{"title":"t"},"deviceInfo":{}}""") {
+      handler.getPlaybackSession("session-1") {}
     }
 
     assertRoute(request, "GET", "/api/session/session-1")
@@ -309,8 +303,8 @@ class ServerApiContractTest {
   /** Server: `get /ping` on the public router — `server/Server.js:367`. */
   @Test
   fun `pingServer calls GET ping outside the api prefix`() {
-    val request = requestFor("""{"success":true}""") { latch ->
-      handler.pingServer(config) { latch.countDown() }
+    val request = requestFor("""{"success":true}""") {
+      handler.pingServer(config) {}
     }
 
     assertRoute(request, "GET", "/ping")
@@ -319,8 +313,8 @@ class ServerApiContractTest {
   /** Server: `post /authorize` — `server/routers/ApiRouter.js:350`. */
   @Test
   fun `authorize posts to api authorize`() {
-    val request = requestFor("""{"user":{"id":"u1","username":"n","mediaProgress":[]}}""") { latch ->
-      handler.authorize(config) { latch.countDown() }
+    val request = requestFor("""{"user":{"id":"u1","username":"n","mediaProgress":[]}}""") {
+      handler.authorize(config) {}
     }
 
     assertRoute(request, "POST", "/api/authorize")
@@ -330,8 +324,8 @@ class ServerApiContractTest {
 
   @Test
   fun `every authenticated request carries the access token as a bearer header`() {
-    val request = requestFor("""{"id":"u1","username":"n","mediaProgress":[]}""") { latch ->
-      handler.getCurrentUser { latch.countDown() }
+    val request = requestFor("""{"id":"u1","username":"n","mediaProgress":[]}""") {
+      handler.getCurrentUser {}
     }
 
     assertEquals("Bearer test-token", request.getHeader("Authorization"))
@@ -340,8 +334,8 @@ class ServerApiContractTest {
   @Test
   fun `no request places the access token in the query string`() {
     // A token in the URL ends up in server access logs and reverse-proxy logs.
-    val request = requestFor("""{"id":"u1","username":"n","mediaProgress":[]}""") { latch ->
-      handler.getCurrentUser { latch.countDown() }
+    val request = requestFor("""{"id":"u1","username":"n","mediaProgress":[]}""") {
+      handler.getCurrentUser {}
     }
 
     assertTrue(

@@ -13,24 +13,25 @@ import com.audiobookshelf.app.data.audioTrack
 import com.audiobookshelf.app.data.book
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.plugins.AbsLog
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.mockk
 import java.io.File
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class DbManagerCleanupTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
   private val ctx = mockk<Context>(relaxed = true)
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
   }
 
@@ -38,16 +39,6 @@ class DbManagerCleanupTest {
     val f = File.createTempFile("abs-clean", ".mp3")
     f.deleteOnExit()
     return f
-  }
-
-  /**
-   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
-   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
-   * whichever class runs next.
-   */
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   @Test

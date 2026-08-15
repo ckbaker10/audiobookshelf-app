@@ -9,16 +9,17 @@ import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.data.playbackSession
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.player.PlayerNotificationService
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -43,13 +44,23 @@ import org.junit.Test
  * cannot run on the host JVM); `listeningTimerRunning` is a public `var` and is set directly.
  */
 class ExternalPauseControlTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var pns: PlayerNotificationService
   private lateinit var syncer: MediaProgressSyncer
   private lateinit var db: DbManager
 
+  /**
+   * Held explicitly rather than reached through `pns.clientEventEmitter` at each verify site. A
+   * `verify(exactly = 0) { pns.clientEventEmitter?.onX() }` records nothing at all when the
+   * property is null, so it passes for the wrong reason - the null-accepting shape TESTING.md
+   * warns about, in a form the written rule does not name. Asserting through a non-null local
+   * removes the possibility.
+   */
+  private lateinit var emitter: PlayerNotificationService.ClientEventEmitter
+
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
     pns = mockk(relaxed = true)
     // A relaxed Context returns a generic proxy for CONNECTIVITY_SERVICE, which
@@ -57,12 +68,9 @@ class ExternalPauseControlTest {
     // than a plain "not connected".
     every { pns.getSystemService(Context.CONNECTIVITY_SERVICE) } returns
             mockk<ConnectivityManager>(relaxed = true)
+    emitter = mockk(relaxed = true)
+    every { pns.clientEventEmitter } returns emitter
     syncer = MediaProgressSyncer(pns, AbsTestEnvironment.apiHandler())
-  }
-
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   private fun setLastSyncTime(millisAgo: Long) {
@@ -123,7 +131,7 @@ class ExternalPauseControlTest {
 
     // Every save goes out through this emitter (MediaProgressSyncer.kt:344), so counting its
     // invocations counts saves - a double save is what turns a duplicate callback into data loss.
-    verify(exactly = 1) { pns.clientEventEmitter?.onLocalMediaProgressUpdate(any()) }
+    verify(exactly = 1) { emitter.onLocalMediaProgressUpdate(any()) }
   }
 
   @Test
@@ -134,7 +142,7 @@ class ExternalPauseControlTest {
 
     syncer.pause { } // no session is being listened to any more - must be a no-op
 
-    verify(exactly = 1) { pns.clientEventEmitter?.onLocalMediaProgressUpdate(any()) }
+    verify(exactly = 1) { emitter.onLocalMediaProgressUpdate(any()) }
     assertEquals(100.0, db.getAllLocalMediaProgress().single().currentTime, 0.0)
   }
 
@@ -218,14 +226,15 @@ class ExternalPauseControlTest {
     syncer.pause { }
 
     assertTrue(db.getAllLocalMediaProgress().isEmpty())
-    verify(exactly = 0) { pns.clientEventEmitter?.onLocalMediaProgressUpdate(any()) }
+    verify(exactly = 0) { emitter.onLocalMediaProgressUpdate(any()) }
   }
 
   @Test
   fun `a pause reported at position zero still clears the listening state without writing`() {
-    // getCurrentTimeSeconds() == 0.0 takes pause's "current time < 0" branch, which skips the sync
-    // entirely. Pinned because that branch is the one that runs when a pause arrives before the
-    // player has actually started rendering.
+    // getCurrentTimeSeconds() == 0.0 fails pause's `if (currentTime > 0)` guard
+    // (MediaProgressSyncer.kt:156), so the sync is skipped entirely while the listening state is
+    // still cleared. Pinned because that branch is the one that runs when a pause arrives before
+    // the player has actually started rendering.
     listening(bookSession(), playerPosition = 0.0)
 
     assertTrue(awaitPause())

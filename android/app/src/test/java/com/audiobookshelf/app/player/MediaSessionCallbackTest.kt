@@ -6,14 +6,15 @@ import com.audiobookshelf.app.data.LibraryItemWithEpisode
 import com.audiobookshelf.app.data.LibraryItemWrapper
 import com.audiobookshelf.app.data.PodcastEpisode
 import com.audiobookshelf.app.media.MediaManager
-import com.audiobookshelf.app.support.AbsTestEnvironment
+import io.mockk.clearMocks
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -29,19 +30,15 @@ import org.junit.Test
  * leak a live thread per test run. Device-test territory.
  */
 class MediaSessionCallbackTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var pns: PlayerNotificationService
   private lateinit var callback: MediaSessionCallback
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     pns = mockk(relaxed = true)
     callback = MediaSessionCallback(pns)
-  }
-
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   @Test
@@ -86,7 +83,6 @@ class MediaSessionCallbackTest {
   @Test
   fun `onCustomAction change speed cycles through the preset table and resets above the range`() {
     val mediaManager = mockk<MediaManager>(relaxed = true)
-    every { pns.mediaManager } returns mediaManager
 
     val table =
             mapOf(
@@ -100,12 +96,19 @@ class MediaSessionCallbackTest {
             )
 
     table.forEach { (current, expectedNext) ->
+      // Recorded calls must be cleared between iterations. Every expected value in the table
+      // recurs (1.0f four times, 1.2f twice, ...), so with a shared call history an
+      // at-least-once `verify` is satisfied from the value's *second* occurrence onward by an
+      // earlier iteration's call rather than by this one - about half the table was
+      // unverifiable. `answers = false` keeps the stubs above intact.
+      clearMocks(mediaManager, pns, answers = false)
       every { mediaManager.getSavedPlaybackRate() } returns current
+      every { pns.mediaManager } returns mediaManager
 
       callback.onCustomAction(CUSTOM_ACTION_CHANGE_SPEED, null)
 
-      verify { mediaManager.setSavedPlaybackRate(expectedNext) }
-      verify { pns.setPlaybackSpeed(expectedNext) }
+      verify(exactly = 1) { mediaManager.setSavedPlaybackRate(expectedNext) }
+      verify(exactly = 1) { pns.setPlaybackSpeed(expectedNext) }
     }
   }
 

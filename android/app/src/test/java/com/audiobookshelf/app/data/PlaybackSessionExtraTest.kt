@@ -78,8 +78,17 @@ class PlaybackSessionExtraTest {
     assertEquals("", session.mediaItemId)
   }
 
+  /**
+   * Characterization of `clone()`'s depth, not just its identity. The `assertSame` below is the
+   * load-bearing assertion: the copy is **shallow**, so both sessions share one `audioTracks`
+   * instance and a mutation through either is visible through the other.
+   *
+   * That is safe as production uses it today - `clone()` is called to snapshot timing fields for a
+   * sync payload, and the track list is not mutated afterwards - but it is a real aliasing edge,
+   * so it is pinned rather than left to be discovered.
+   */
   @Test
-  fun `clone copies all fields but is a distinct instance`() {
+  fun `clone is a distinct instance but shares its track list with the original`() {
     val session = playbackSession(tracks = mutableListOf(audioTrack()), currentTime = 5.0)
     session.timeListening = 42L
 
@@ -89,7 +98,15 @@ class PlaybackSessionExtraTest {
     assertEquals(session.id, clone.id)
     assertEquals(session.timeListening, clone.timeListening)
     assertEquals(session.currentTime, clone.currentTime, 0.0)
-    assertSame(session.audioTracks, clone.audioTracks)
+    assertSame("clone() is shallow: both sessions share one track list", session.audioTracks, clone.audioTracks)
+
+    // The consequence, made explicit rather than left implied by assertSame.
+    session.audioTracks.add(audioTrack(index = 9))
+    assertEquals(
+            "a track added through the original is visible through the clone",
+            session.audioTracks.size,
+            clone.audioTracks.size
+    )
   }
 
   @Test
