@@ -14,10 +14,12 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**58 tests, 21 enabled failures.**
+**131 tests, 23 enabled failures.**
 
-Every failure is a contract for a reported upstream issue. They are red on purpose: they state what
-should happen, and each fix belongs on its own branch.
+Every failure is a contract that production does not currently meet. They are red on purpose: they
+state what should happen, and each fix belongs on its own branch.
+
+Reported upstream issues:
 
 | Issue | Spec | Red |
 | --- | --- | ---: |
@@ -27,8 +29,16 @@ should happen, and each fix belongs on its own branch.
 | [#1274](https://github.com/advplyr/audiobookshelf-app/issues/1274) OpenID demands HTTPS for the ABS server | `connection/openid-transport-policy.spec.js` | 3 |
 | [#1870](https://github.com/advplyr/audiobookshelf-app/issues/1870) Collections keeps the previous tab's count | `bookshelf/collections-state.spec.js` | 2 |
 
-The other 37 are green: the harness's own tests, the Home shelf characterization, and the guards
-inside each defect file that pin the working path a fix must not break.
+Found by scanning, with no issue filed:
+
+| Defect | Spec | Red |
+| --- | --- | ---: |
+| `$sanitizeFilename` throws `ReferenceError: Path is not defined` for any name over 240 chars - `Path` is never imported | `plugins/sanitize-helpers.spec.js` | 1 |
+| `$secondsToTimestampFull` renders `00:00:60`, rounding seconds before deriving minutes so the carry never happens | `plugins/format-helpers.spec.js` | 1 |
+
+The other 108 are green: the harness's own tests, the Home shelf characterization, the guards
+inside each defect file that pin the working path a fix must not break, and the behaviour and
+edge-case coverage for the pure helpers and store getters.
 
 If you change the suite, re-run it and update these numbers from the run.
 
@@ -85,6 +95,25 @@ guide, where a test can look like it exercises code that never ran.
 If you need real layout, that is a browser-based test (Playwright/Cypress) and a different tool.
 Do not fake your way to a number and assert on it.
 
+## Characterization vs. defect spec
+
+Much of the pure-helper coverage pins behaviour that is odd but arguably intended. The rule used
+here:
+
+- **Defect spec** - the result is indefensible for any caller (a `ReferenceError`, an invalid
+  timestamp). Enabled and failing, with inputs/expected/observed in the KDoc.
+- **Characterization** - the result is surprising but no caller is known to be harmed, or the
+  intent is genuinely ambiguous from the code. Passing, labelled `(characterization)` in the name,
+  with the reasoning in the comment so nobody "fixes" it by accident.
+
+Examples of the second kind currently pinned: `$bytesPretty(-1024)` is `'NaN undefined'`;
+`$secondsToTimestamp(-90)` is `'-1:58:30'`; `$sanitizeSlug`'s invalid-character class contains an
+accidental range (`-` between a space and `_` is 0x20-0x5F) so it admits `+`, `(`, `)` and `.`;
+`isValidVersion('2.17.0-beta', '2.17.1')` is `true`, matching the Android client's equivalent.
+
+When in doubt, prefer a characterization and say why. A wrong defect spec sends someone to change
+working code.
+
 ## Two ways these tests can lie, and how they are avoided
 
 Both were hit while writing the current specs, so they are not hypothetical.
@@ -116,9 +145,12 @@ Before writing an assertion, ask what would have to be true for it to fail. If t
 test/
   support/harness.js          the fakes and the mount helper
   support/harness.spec.js     smoke tests for the harness itself
+  support/initPlugin.js       loads plugins/init.client.js with native seams mocked
   bookshelf/                  shelf and library-view state
   navigation/                 routing and lifecycle across screens
   connection/                 server connection and auth
+  plugins/                    pure helpers hung off Vue.prototype
+  store/                      Vuex getters, called directly
 ```
 
 One file per issue or behaviour cluster, named for what it covers rather than for the component it
