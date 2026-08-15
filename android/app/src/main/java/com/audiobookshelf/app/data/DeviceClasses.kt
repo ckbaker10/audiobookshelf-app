@@ -87,9 +87,10 @@ data class LocalFile(
 
   @JsonIgnore
   fun isAudioFile(): Boolean {
-    if (mimeType == "application/octet-stream") return true
-    if (mimeType == "video/mp4") return true
-    return mimeType?.startsWith("audio") == true
+    val normalizedMimeType = mimeType?.substringBefore(';')?.trim()?.lowercase()
+    if (normalizedMimeType == "application/octet-stream") return true
+    if (normalizedMimeType == "video/mp4") return true
+    return normalizedMimeType?.startsWith("audio/") == true
   }
   @JsonIgnore
   fun isEBookFile(): Boolean {
@@ -97,12 +98,13 @@ data class LocalFile(
   }
   @JsonIgnore
   fun getEBookFormat(): String? {
-    if (mimeType == "application/epub+zip") return "epub"
-    if (mimeType == "application/pdf") return "pdf"
-    if (mimeType == "application/x-mobipocket-ebook") return "mobi"
-    if (mimeType == "application/vnd.comicbook+zip") return "cbz"
-    if (mimeType == "application/vnd.comicbook-rar") return "cbr"
-    if (mimeType == "application/vnd.amazon.mobi8-ebook") return "azw3"
+    val normalizedMimeType = mimeType?.substringBefore(';')?.trim()?.lowercase()
+    if (normalizedMimeType == "application/epub+zip") return "epub"
+    if (normalizedMimeType == "application/pdf") return "pdf"
+    if (normalizedMimeType == "application/x-mobipocket-ebook") return "mobi"
+    if (normalizedMimeType == "application/vnd.comicbook+zip") return "cbz"
+    if (normalizedMimeType == "application/vnd.comicbook-rar") return "cbr"
+    if (normalizedMimeType == "application/vnd.amazon.mobi8-ebook") return "azw3"
     return null
   }
 }
@@ -214,16 +216,19 @@ data class DeviceSettings(
     get() = jumpForwardTime * 1000L
   @get:JsonIgnore
   val autoSleepTimerStartHour
-    get() = autoSleepTimerStartTime.split(":")[0].toInt()
+    // A malformed or separator-less string (never persisted by this app, but not otherwise
+    // validated on the way in) must not crash the hour/minute lookup - fall back to the
+    // default("22:00") start/("06:00") end used when a device has no explicit setting yet.
+    get() = autoSleepTimerStartTime.split(":").getOrNull(0)?.toIntOrNull() ?: 22
   @get:JsonIgnore
   val autoSleepTimerStartMinute
-    get() = autoSleepTimerStartTime.split(":")[1].toInt()
+    get() = autoSleepTimerStartTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
   @get:JsonIgnore
   val autoSleepTimerEndHour
-    get() = autoSleepTimerEndTime.split(":")[0].toInt()
+    get() = autoSleepTimerEndTime.split(":").getOrNull(0)?.toIntOrNull() ?: 6
   @get:JsonIgnore
   val autoSleepTimerEndMinute
-    get() = autoSleepTimerEndTime.split(":")[1].toInt()
+    get() = autoSleepTimerEndTime.split(":").getOrNull(1)?.toIntOrNull() ?: 0
 
   @JsonIgnore
   fun getShakeThresholdGravity(): Float { // Used in ShakeDetector

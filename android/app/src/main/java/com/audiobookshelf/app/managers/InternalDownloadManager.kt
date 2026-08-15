@@ -4,7 +4,7 @@ import android.util.Log
 import java.io.File
 import java.io.FileOutputStream
 import java.io.IOException
-import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.OkHttpClient
@@ -19,6 +19,11 @@ class InternalDownloadManager(
         private val hasAvailableSpace: () -> Boolean
 ) {
   private val tag = "InternalDownloadManager"
+  // Routed through MtlsManager (rather than a fixed companion client) so a download presents
+  // the configured client certificate when the connected server requires mTLS.
+  private val client: OkHttpClient =
+          MtlsManager.getClient(connectTimeout = 30, readTimeout = 60, writeTimeout = 60)
+
   /**
    * Starts or resumes a download.
    *
@@ -71,14 +76,34 @@ class InternalDownloadManager(
                       return
                     }
 
+                    // expectedSize <= 0 (the production default for cover parts) means the length
+                    // check below can't catch anything, so a reverse proxy's HTML error page
+                    // served as 200 would otherwise be written to disk and reported as a
+                    // completed download.
+                    if (expectedSize <= 0L) {
+                      val contentType = response.header("Content-Type")
+                      if (contentType != null && contentType.startsWith("text/html", ignoreCase = true)) {
+                        Log.e(tag, "Refusing text/html response with no expected size to verify against")
+                        progressCallback.onComplete(true)
+                        return
+                      }
+                    }
+
+                    // The request above declares Accept-Encoding: identity, so OkHttp never adds
+                    // its own transparent gzip decompression here - a proxy that ignores that
+                    // header and gzips anyway would otherwise have its compressed bytes written
+                    // to disk verbatim as if they were the real file.
+                    val isGzipped = response.header("Content-Encoding")?.equals("gzip", ignoreCase = true) == true
+
                     val startingBytes = if (append) existingBytes else 0L
                     val responseLength = response.body!!.contentLength()
                     val totalLength =
                             if (expectedSize > 0L) expectedSize
-                            else if (responseLength >= 0L) startingBytes + responseLength else 0L
+                            else if (!isGzipped && responseLength >= 0L) startingBytes + responseLength else 0L
 
                     FileOutputStream(destinationFile, append).use { output ->
-                      response.body!!.byteStream().use { input ->
+                      val rawInput = response.body!!.byteStream()
+                      (if (isGzipped) GZIPInputStream(rawInput) else rawInput).use { input ->
                         val buffer = ByteArray(CHUNK_SIZE)
                         var totalBytes = startingBytes
                         while (true) {
@@ -125,11 +150,5 @@ class InternalDownloadManager(
   private companion object {
     const val CHUNK_SIZE = 512 * 1024 // 512 KB
     val CONTENT_RANGE = Regex("bytes (\\d+)-(\\d+)/(?:\\d+|\\*)")
-    val client =
-            OkHttpClient.Builder()
-                    .connectTimeout(30, TimeUnit.SECONDS)
-                    .readTimeout(60, TimeUnit.SECONDS)
-                    .writeTimeout(60, TimeUnit.SECONDS)
-                    .build()
   }
 }

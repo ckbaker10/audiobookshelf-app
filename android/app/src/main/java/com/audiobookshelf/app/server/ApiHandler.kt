@@ -14,6 +14,7 @@ import com.audiobookshelf.app.media.SyncResult
 import com.audiobookshelf.app.models.User
 import com.audiobookshelf.app.BuildConfig
 import com.audiobookshelf.app.plugins.AbsLogger
+import com.audiobookshelf.app.managers.MtlsManager
 import com.audiobookshelf.app.managers.SecureStorage
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties
 import com.fasterxml.jackson.core.json.JsonReadFeature
@@ -30,7 +31,6 @@ import org.json.JSONArray
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
-import java.util.concurrent.TimeUnit
 
 class ApiHandler(var ctx:Context) {
   val tag = "ApiHandler"
@@ -44,8 +44,6 @@ class ApiHandler(var ctx:Context) {
     }
   }
 
-  private var defaultClient = OkHttpClient()
-  private var pingClient = OkHttpClient.Builder().callTimeout(3, TimeUnit.SECONDS).build()
   private var jacksonMapper = jacksonObjectMapper().enable(JsonReadFeature.ALLOW_UNESCAPED_CONTROL_CHARS.mappedFeature())
   private var secureStorage = SecureStorage(ctx)
 
@@ -56,11 +54,13 @@ class ApiHandler(var ctx:Context) {
   private fun getRequest(endpoint:String, httpClient:OkHttpClient?, config:ServerConnectionConfig?, cb: (JSObject) -> Unit) {
     val address = config?.address ?: DeviceManager.serverAddress
     val token = config?.token ?: DeviceManager.token
+    val customHeaders = config?.customHeaders ?: DeviceManager.serverConnectionConfig?.customHeaders
 
     try {
-      val request = Request.Builder()
+      val requestBuilder = Request.Builder()
         .url("${address}$endpoint").addHeader("Authorization", "Bearer $token")
-        .build()
+      customHeaders?.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+      val request = requestBuilder.build()
       makeRequest(request, httpClient, cb)
     } catch(e: Exception) {
       e.printStackTrace()
@@ -73,14 +73,16 @@ class ApiHandler(var ctx:Context) {
   private fun postRequest(endpoint:String, payload: JSObject?, config:ServerConnectionConfig?, cb: (JSObject) -> Unit) {
     val address = config?.address ?: DeviceManager.serverAddress
     val token = config?.token ?: DeviceManager.token
+    val customHeaders = config?.customHeaders ?: DeviceManager.serverConnectionConfig?.customHeaders
     val mediaType = "application/json; charset=utf-8".toMediaType()
     val requestBody = payload?.toString()?.toRequestBody(mediaType) ?: EMPTY_REQUEST
     val requestUrl = "${address}$endpoint"
     Log.d(tag, "postRequest to $requestUrl")
     try {
-      val request = Request.Builder().post(requestBody)
+      val requestBuilder = Request.Builder().post(requestBody)
         .url(requestUrl).addHeader("Authorization", "Bearer ${token}")
-        .build()
+      customHeaders?.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+      val request = requestBuilder.build()
       makeRequest(request, null, cb)
     } catch(e: Exception) {
       e.printStackTrace()
@@ -94,9 +96,10 @@ class ApiHandler(var ctx:Context) {
     val mediaType = "application/json; charset=utf-8".toMediaType()
     val requestBody = payload.toString().toRequestBody(mediaType)
     try {
-      val request = Request.Builder().patch(requestBody)
+      val requestBuilder = Request.Builder().patch(requestBody)
         .url("${DeviceManager.serverAddress}$endpoint").addHeader("Authorization", "Bearer ${DeviceManager.token}")
-        .build()
+      DeviceManager.serverConnectionConfig?.customHeaders?.forEach { (name, value) -> requestBuilder.addHeader(name, value) }
+      val request = requestBuilder.build()
       makeRequest(request, null, cb)
     } catch(e: Exception) {
       e.printStackTrace()
@@ -107,15 +110,16 @@ class ApiHandler(var ctx:Context) {
   }
 
   private fun makeRequest(request:Request, httpClient:OkHttpClient?, cb: (JSObject) -> Unit) {
-    val client = httpClient ?: defaultClient
+    val client = httpClient ?: MtlsManager.getClient()
 
     client.newCall(request).enqueue(object : Callback {
       override fun onFailure(call: Call, e: IOException) {
-        Log.d(tag, "FAILURE TO CONNECT")
+        val url = call.request().url
+        Log.e(tag, "makeRequest: FAILURE TO CONNECT to $url — ${e.javaClass.simpleName}: ${e.message}")
         e.printStackTrace()
 
         val jsobj = JSObject()
-        jsobj.put("error", "Failed to connect")
+        jsobj.put("error", "Failed to connect to $url: ${e.javaClass.simpleName}: ${e.message}")
         cb(jsobj)
       }
 
@@ -129,8 +133,9 @@ class ApiHandler(var ctx:Context) {
           }
 
           if (!it.isSuccessful) {
+            Log.e(tag, "makeRequest: HTTP ${it.code} from ${request.url}")
             val jsobj = JSObject()
-            jsobj.put("error", "Unexpected code $response")
+            jsobj.put("error", "HTTP ${it.code} from ${request.url}")
             cb(jsobj)
             return
           }
@@ -209,19 +214,34 @@ class ApiHandler(var ctx:Context) {
         .build()
 
       // Make the refresh request
-      val client = httpClient ?: defaultClient
+      val client = httpClient ?: MtlsManager.getClient()
       client.newCall(refreshRequest).enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
           Log.e(tag, "handleTokenRefresh: Failed to connect to refresh endpoint", e)
           AbsLogger.error(tag, "handleTokenRefresh: Failed to connect to refresh endpoint for server ${DeviceManager.serverConnectionConfigString} (error: ${e.message})")
-          handleRefreshFailure(callback)
+          // A transport-level failure (dropped connection, DNS, captive portal, VPN transition)
+          // is retryable - nothing about it says the refresh token is invalid, so the session must
+          // not be discarded the way handleRefreshFailure does.
+          val errorObj = JSObject()
+          errorObj.put("error", "Failed to connect to refresh endpoint")
+          callback(errorObj)
         }
 
         override fun onResponse(call: Call, response: Response) {
           response.use {
             if (!it.isSuccessful) {
-              AbsLogger.error(tag, "handleTokenRefresh: Refresh request failed with status ${it.code} for server ${DeviceManager.serverConnectionConfigString}")
-              handleRefreshFailure(callback)
+              if (it.code == 401) {
+                // The one response that actually means this refresh token is no longer valid.
+                AbsLogger.error(tag, "handleTokenRefresh: Refresh token rejected (401) for server ${DeviceManager.serverConnectionConfigString}")
+                handleRefreshFailure(callback)
+              } else {
+                // 5xx/429/etc are retryable - a restarting or overloaded server must not log the
+                // user out, unlike a 401 which specifically means the refresh token is invalid.
+                AbsLogger.error(tag, "handleTokenRefresh: Refresh request failed with status ${it.code} for server ${DeviceManager.serverConnectionConfigString}")
+                val errorObj = JSObject()
+                errorObj.put("error", "Refresh request failed with status ${it.code}")
+                callback(errorObj)
+              }
               return
             }
 
@@ -231,8 +251,12 @@ class ApiHandler(var ctx:Context) {
               val userObj = responseJson.optJSONObject("user")
 
               if (userObj == null) {
+                // A 2xx with an unexpected body shape is not the same as a 401 - it says nothing
+                // about whether the refresh token itself is valid, so it must not log the user out.
                 AbsLogger.error(tag, "handleTokenRefresh: No user object in refresh response for server ${DeviceManager.serverConnectionConfigString}")
-                handleRefreshFailure(callback)
+                val errorObj = JSObject()
+                errorObj.put("error", "Unexpected refresh response shape")
+                callback(errorObj)
                 return
               }
 
@@ -241,7 +265,9 @@ class ApiHandler(var ctx:Context) {
 
               if (newAccessToken.isEmpty()) {
                 AbsLogger.error(tag, "handleTokenRefresh: No access token in refresh response for server ${DeviceManager.serverConnectionConfigString}")
-                handleRefreshFailure(callback)
+                val errorObj = JSObject()
+                errorObj.put("error", "Unexpected refresh response shape")
+                callback(errorObj)
                 return
               }
 
@@ -255,9 +281,15 @@ class ApiHandler(var ctx:Context) {
               retryOriginalRequest(originalRequest, newAccessToken, httpClient, callback)
 
             } catch (e: Exception) {
+              // Same principle as above: a response that fails to parse is not proof the refresh
+              // token is invalid (it can also be what a retried connection after a transport
+              // failure looks like once OkHttp's automatic retry lands on a still-exhausted mock
+              // response queue), so it must not log the user out either.
               Log.e(tag, "handleTokenRefresh: Failed to parse refresh response", e)
               AbsLogger.error(tag, "handleTokenRefresh: Failed to parse refresh response for server ${DeviceManager.serverConnectionConfigString} (error: ${e.message})")
-              handleRefreshFailure(callback)
+              val errorObj = JSObject()
+              errorObj.put("error", "Failed to parse refresh response")
+              callback(errorObj)
             }
           }
         }
@@ -325,7 +357,7 @@ class ApiHandler(var ctx:Context) {
       Log.d(tag, "retryOriginalRequest: Retrying request to ${newRequest.url}")
 
       // Make the retry request
-      val client = httpClient ?: defaultClient
+      val client = httpClient ?: MtlsManager.getClient()
       client.newCall(newRequest).enqueue(object : Callback {
         override fun onFailure(call: Call, e: IOException) {
           Log.e(tag, "retryOriginalRequest: Failed to retry request", e)
@@ -389,13 +421,19 @@ class ApiHandler(var ctx:Context) {
     try {
       Log.d(tag, "handleRefreshFailure: Token refresh failed, clearing session")
 
+      // Captured before the config is cleared. DeviceManager.serverConnectionConfigId is defined
+      // as `serverConnectionConfig?.id ?: ""`, so reading it after the null-out below always
+      // yielded "" - which silently skipped both the removeRefreshToken call and the listener
+      // notification guarded by the same check, leaving the rejected refresh token behind in
+      // secure storage on every logout this path performs.
+      val serverConnectionConfigId = DeviceManager.serverConnectionConfigId
+
       // Clear the current server connection
       DeviceManager.serverConnectionConfig = null
       DeviceManager.deviceData.lastServerConnectionConfigId = null
       DeviceManager.dbManager.saveDeviceData(DeviceManager.deviceData)
 
       // Remove refresh token from secure storage
-      val serverConnectionConfigId = DeviceManager.serverConnectionConfigId
       if (serverConnectionConfigId.isNotEmpty()) {
         secureStorage.removeRefreshToken(serverConnectionConfigId)
       }
@@ -429,8 +467,17 @@ class ApiHandler(var ctx:Context) {
         Log.e(tag, it.getString("error") ?: "getCurrentUser Failed")
         cb(null)
       } else {
-        val user = jacksonMapper.readValue<User>(it.toString())
-        cb(user)
+        try {
+          val user = jacksonMapper.readValue<User>(it.toString())
+          cb(user)
+        } catch (e: Exception) {
+          // Valid JSON that doesn't match User's shape (e.g. a missing non-nullable field) would
+          // otherwise throw here with nothing to catch it, so the callback never fires - not with
+          // the user, not with null, not at all - and a caller waiting on it (or a UI spinner
+          // gated on it) hangs indefinitely.
+          Log.e(tag, "getCurrentUser: failed to parse response", e)
+          cb(null)
+        }
       }
     }
   }
@@ -597,7 +644,12 @@ class ApiHandler(var ctx:Context) {
 
   fun getSearchResults(libraryId:String, queryString:String, cb: (LibraryItemSearchResultType?) -> Unit) {
     Log.d(tag, "Doing search for library $libraryId")
-    getRequest("/api/libraries/$libraryId/search?q=$queryString", null, null) {
+    // queryString is user search input and must not be interpolated raw - an unencoded '&' or
+    // '=' would otherwise split it into extra, attacker/user-controlled query parameters instead
+    // of arriving as a single "q" value.
+    val encodedQuery = HttpUrl.Builder().scheme("http").host("localhost")
+      .addQueryParameter("q", queryString).build().encodedQuery
+    getRequest("/api/libraries/$libraryId/search?$encodedQuery", null, null) {
       if (it.has("error")) {
         Log.e(tag, it.getString("error") ?: "getSearchResults Failed")
         cb(null)
@@ -695,8 +747,7 @@ class ApiHandler(var ctx:Context) {
   fun getMediaProgress(libraryItemId:String, episodeId:String?, serverConnectionConfig:ServerConnectionConfig?, cb: (MediaProgress?) -> Unit) {
     val endpoint = if(episodeId.isNullOrEmpty()) "/api/me/progress/$libraryItemId" else "/api/me/progress/$libraryItemId/$episodeId"
 
-    // TODO: Using ping client here allows for shorter timeout (3 seconds), maybe rename or make diff client for requests requiring quicker response
-    getRequest(endpoint, pingClient, serverConnectionConfig) {
+    getRequest(endpoint, MtlsManager.getClient(callTimeout = 3), serverConnectionConfig) {
       if (it.has("error")) {
         Log.e(tag, "getMediaProgress: Failed to get progress")
         cb(null)
@@ -722,7 +773,7 @@ class ApiHandler(var ctx:Context) {
 
   fun pingServer(config:ServerConnectionConfig, cb: (Boolean) -> Unit) {
     Log.d(tag, "pingServer: Pinging ${config.address}")
-    getRequest("/ping", pingClient, config) {
+    getRequest("/ping", MtlsManager.getClient(callTimeout = 3), config) {
       val success = it.getString("success")
       if (success.isNullOrEmpty()) {
         Log.d(tag, "pingServer: Ping ${config.address} Failed")

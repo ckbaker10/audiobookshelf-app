@@ -8,6 +8,7 @@ import com.audiobookshelf.app.data.*
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.media.MediaEventManager
 import com.audiobookshelf.app.server.ApiHandler
+import com.audiobookshelf.app.managers.MtlsManager
 import com.audiobookshelf.app.managers.SecureStorage
 import com.fasterxml.jackson.core.json.JsonReadFeature
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
@@ -178,6 +179,8 @@ class AbsDatabase : Plugin() {
       }
 
       DeviceManager.serverConnectionConfig = serverConnectionConfig
+      // Refresh centralized mTLS state for this server (no-op if no cert is configured)
+      MtlsManager.refreshForServer(serverConnectionConfig!!.id)
       call.resolve(JSObject(jacksonMapper.writeValueAsString(DeviceManager.serverConnectionConfig)))
     }
   }
@@ -362,6 +365,13 @@ class AbsDatabase : Plugin() {
       if (localMediaProgress == null) {
         Log.w(tag, "syncServerMediaProgressWithLocalMediaProgress Local media progress not found $localMediaProgressId")
         call.resolve()
+      } else if (mediaProgress.lastUpdate <= localMediaProgress.lastUpdate) {
+        // Same missing comparison as LocalMediaProgress.updateFromPlaybackSession, reached
+        // through the websocket push path instead - a push no newer than what's already stored
+        // must not overwrite it. Its sibling caller, ApiHandler.syncLocalMediaProgressForUser,
+        // already compares on lastUpdate before applying.
+        Log.d(tag, "syncServerMediaProgressWithLocalMediaProgress: ignoring push older than stored record $localMediaProgressId")
+        call.resolve(JSObject(jacksonMapper.writeValueAsString(localMediaProgress)))
       } else {
         MediaEventManager.syncEvent(mediaProgress, "Received from webhook event")
 
@@ -586,6 +596,98 @@ class AbsDatabase : Plugin() {
       } else {
         call.resolve(JSObject(jacksonMapper.writeValueAsString(mediaItemHistory)))
       }
+    }
+  }
+
+  /**
+   * Returns the currently selected mTLS client certificate alias for the given server,
+   * or null/empty if none is configured.
+   *
+   * JS call: AbsDatabase.getClientCertificateAlias({ serverConnectionConfigId })
+   * Resolves: { alias: string | null }
+   */
+  @PluginMethod
+  fun getClientCertificateAlias(call: PluginCall) {
+    val serverConnectionConfigId = call.getString("serverConnectionConfigId") ?: DeviceManager.serverConnectionConfigId
+    val alias = MtlsManager.getAliasForServer(serverConnectionConfigId)
+    val ret = JSObject()
+    ret.put("alias", alias)
+    call.resolve(ret)
+  }
+
+  /**
+   * Opens the Android system certificate picker so the user can select a client certificate
+   * to use for mTLS connections to the given server. After selection the OkHttp clients are
+   * rebuilt with the new certificate.
+   *
+   * JS call: AbsDatabase.selectClientCertificate({ serverConnectionConfigId?, serverAddress? })
+   * Resolves: { alias: string | null }
+   */
+  @PluginMethod
+  fun selectClientCertificate(call: PluginCall) {
+    val serverConnectionConfigId = call.getString("serverConnectionConfigId") ?: DeviceManager.serverConnectionConfigId
+    val serverAddress = call.getString("serverAddress") ?: DeviceManager.serverAddress
+
+    MtlsManager.chooseAlias(mainActivity, serverConnectionConfigId, serverAddress) { alias ->
+      Log.d(tag, "selectClientCertificate: selected alias=$alias for server=$serverConnectionConfigId")
+      if (alias != null && serverConnectionConfigId.isNotEmpty()) {
+        MtlsManager.refreshForServerAsync(serverConnectionConfigId)
+      } else if (alias != null) {
+        // No server config ID yet (e.g. before first login): apply globally without saving under a config ID
+        MtlsManager.applyAsGlobalDefaultForAliasAsync(alias)
+      }
+      val ret = JSObject()
+      ret.put("alias", alias)
+      call.resolve(ret)
+    }
+  }
+
+  /**
+   * Applies a client certificate alias as the global SSLSocketFactory without saving it
+   * to any server config. Use this before the first login when the server config ID is unknown.
+   *
+   * JS call: AbsDatabase.applyClientCertAlias({ alias })
+   * Resolves: {}
+   */
+  @PluginMethod
+  fun applyClientCertAlias(call: PluginCall) {
+    val alias = call.getString("alias") ?: return call.reject("alias is required")
+    MtlsManager.applyAsGlobalDefaultForAliasAsync(alias) { call.resolve() }
+  }
+
+  /**
+   * Saves a certificate alias for the given server config and applies it as the global
+   * SSLSocketFactory. Use this after login to persist the cert under the real config ID.
+   *
+   * JS call: AbsDatabase.setClientCertificateAlias({ serverConnectionConfigId, alias })
+   * Resolves: {}
+   */
+  @PluginMethod
+  fun setClientCertificateAlias(call: PluginCall) {
+    val serverConnectionConfigId = call.getString("serverConnectionConfigId") ?: return call.reject("serverConnectionConfigId is required")
+    val alias = call.getString("alias")
+    MtlsManager.setAliasForServer(serverConnectionConfigId, alias)
+    MtlsManager.refreshForServerAsync(serverConnectionConfigId) { call.resolve() }
+  }
+
+  /**
+   * Clears the mTLS client certificate configured for the given server and reverts to
+   * standard (non-mTLS) OkHttp clients.
+   *
+   * JS call: AbsDatabase.clearClientCertificate({ serverConnectionConfigId? })
+   * Resolves: { success: true }
+   */
+  @PluginMethod
+  fun clearClientCertificate(call: PluginCall) {
+    val serverConnectionConfigId = call.getString("serverConnectionConfigId") ?: DeviceManager.serverConnectionConfigId
+    MtlsManager.clearAliasForServer(serverConnectionConfigId)
+    // Resolve only after the cached OkHttp/SSL state is actually cleared, matching
+    // setClientCertificateAlias - otherwise a caller can see "cleared" resolve while a client
+    // still presents the old certificate.
+    MtlsManager.refreshForServerAsync(serverConnectionConfigId) {
+      val ret = JSObject()
+      ret.put("success", true)
+      call.resolve(ret)
     }
   }
 }
