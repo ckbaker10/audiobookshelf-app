@@ -14,7 +14,7 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**235 tests, 0 failures.** The fix queue is empty.
+**247 tests, 0 failures.** The fix queue is empty.
 
 That is the target, not a permanent state: a newly found defect *should* make this number non-zero
 until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
@@ -130,7 +130,7 @@ test/
   support/harness.js          the fakes and the mount helper
   support/harness.spec.js     smoke tests for the harness itself
   support/initPlugin.js       loads plugins/init.client.js with native seams mocked
-  bookshelf/                  shelf and library-view state
+  bookshelf/                  shelf and library-view state, incl. offline behaviour
   navigation/                 routing and lifecycle across screens
   connection/                 server connection and auth
   plugins/                    pure helpers and the nativeHttp request/refresh path

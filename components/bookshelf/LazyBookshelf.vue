@@ -7,6 +7,11 @@
       </div>
     </template>
 
+    <div v-if="showingLocalContent" class="w-full flex items-center justify-center py-2">
+      <span class="material-symbols text-error text-lg">cloud_off</span>
+      <p class="pl-2 text-error text-sm">{{ $strings.MessageAudiobookshelfServerNotConnected }}</p>
+    </div>
+
     <div v-show="!entities.length && initialized" class="w-full py-16 text-center text-xl">
       <div v-if="page === 'collections'" class="py-4">{{ $strings.MessageNoCollections }}</div>
       <div v-else class="py-4 capitalize">No {{ entityName }}</div>
@@ -45,10 +50,42 @@ export default {
       pagesLoaded: {},
       isFirstInit: false,
       pendingReset: false,
-      localLibraryItems: []
+      localLibraryItems: [],
+      // True while the shelf is presenting downloads instead of the server's library, so the
+      // template can say so rather than leaving the user to wonder why the list shrank.
+      showingLocalContent: false,
+      reconnectTimeout: null
     }
   },
   watch: {
+    /**
+     * Connectivity changing *while the tab is open* is a separate decision from the one `init`
+     * makes once, and it was previously not made at all - `pages/bookshelf/index.vue` has watched
+     * this since before the Library tab existed.
+     *
+     * Losing the connection leaves server entities on screen whose covers cannot load and whose
+     * next page will never arrive, so switch to what is on the device. Regaining it has to switch
+     * back, or "works offline" quietly becomes "stops using the server".
+     */
+    networkConnected(newVal) {
+      this.clearReconnectTimeout()
+
+      if (!newVal) {
+        if (!this.isFirstInit) return
+        this.setEntitiesFromLocal()
+        return
+      }
+
+      if (!this.user) return
+      // Deferred deliberately. The Home shelf records that fetching as soon as the network reports
+      // connected "will often fail on Android" - the interface is up before it is usable.
+      this.reconnectTimeout = setTimeout(() => {
+        this.reconnectTimeout = null
+        // Re-check: the connection may have dropped again while this was pending.
+        if (!this.networkConnected || !this.user) return
+        this.reloadFromServer()
+      }, 4000)
+    },
     showBookshelfListView(newVal) {
       this.resetEntities()
     },
@@ -134,6 +171,9 @@ export default {
       if (this.showBookshelfListView) return 88
       return this.bookHeight
     },
+    networkConnected() {
+      return this.$store.state.networkConnected
+    },
     currentLibraryId() {
       return this.$store.state.libraries.currentLibraryId
     },
@@ -201,6 +241,7 @@ export default {
       }
       if (payload && payload.results) {
         console.log('Received payload', payload)
+        this.showingLocalContent = false
         if (!this.initialized) {
           this.initialized = true
           this.totalEntities = payload.total
@@ -238,6 +279,7 @@ export default {
     setEntitiesFromLocal() {
       const localEntities = this.isBookEntity ? this.localLibraryItems || [] : []
 
+      this.showingLocalContent = true
       this.entities = [...localEntities]
       this.totalEntities = localEntities.length
       this.totalShelves = Math.ceil(this.totalEntities / this.entitiesPerShelf)
@@ -248,6 +290,22 @@ export default {
         const lastIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
         this.mountEntites(0, lastIndex)
       }
+    },
+    clearReconnectTimeout() {
+      if (this.reconnectTimeout) {
+        clearTimeout(this.reconnectTimeout)
+        this.reconnectTimeout = null
+      }
+    },
+    /** Re-fetches the library from the server after connectivity returns. */
+    async reloadFromServer() {
+      this.localLibraryItems = (await this.$db.getLocalLibraryItems(this.currentLibraryMediaType)) || []
+      this.initialized = false
+      this.pagesLoaded = {}
+      this.entities = []
+      await this.loadPage(0)
+      const lastIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
+      this.mountEntites(0, lastIndex)
     },
     async loadPage(page) {
       if (!this.currentLibraryId) {
@@ -384,8 +442,10 @@ export default {
       this.localLibraryItems = (await this.$db.getLocalLibraryItems(this.currentLibraryMediaType)) || []
       console.log('Local library items loaded for lazy bookshelf', this.localLibraryItems.length)
 
-      if (!this.user) {
-        // No server session. Show what is on the device instead of an empty shelf (#542).
+      // No server session, or no network to reach it with. Show what is on the device instead of
+      // an empty shelf (#542), and do not fire a request that cannot succeed - the Home shelf has
+      // always gated on all three of these (`user && currentLibraryId && networkConnected`).
+      if (!this.user || !this.networkConnected) {
         this.isFirstInit = true
         this.initSizeData()
         this.setEntitiesFromLocal()
@@ -587,6 +647,7 @@ export default {
     this.initListeners()
   },
   beforeDestroy() {
+    this.clearReconnectTimeout()
     this.removeListeners()
 
     // Set bookshelf scroll position for specific bookshelf page and query
