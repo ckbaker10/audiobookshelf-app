@@ -105,6 +105,12 @@ class PlaybackSession(
         return i
       }
     }
+    // Falling through means the position is outside every track's range, which happens in two
+    // opposite situations that must not get the same answer: *before* the first track starts
+    // (a negative position, seen after a bad seek or a restored session), and *at or after* the
+    // last track's end. Returning the last index unconditionally sent a negative position to the
+    // final track, while getNextTrackIndex answered 0 for the same input - the two disagreed.
+    if (audioTracks.isNotEmpty() && currentTimeMs < audioTracks[0].startOffsetMs) return 0
     // -1 for an empty list, which every caller then uses to index audioTracks. Sibling
     // getTrackStartOffsetMs already guards exactly this (index < 0 || index >= size -> 0L).
     return (audioTracks.size - 1).coerceAtLeast(0)
