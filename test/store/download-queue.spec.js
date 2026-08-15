@@ -47,9 +47,12 @@ describe('addUpdateItemDownload', () => {
   })
 
   it('replaces an existing item in place rather than appending a duplicate', () => {
-    const state = { itemDownloads: [item({ itemProgress: 0.2 })] }
+    // Progress is expressed through the parts, not asserted as a bare number: `itemProgress` is
+    // derived on the way in, so a fixture claiming a percentage its parts contradict would be
+    // asserting the fixture rather than the mutation.
+    const state = { itemDownloads: [item({ downloadItemParts: [part({ bytesDownloaded: 200 })] })] }
 
-    mutations.addUpdateItemDownload(state, item({ itemProgress: 0.9 }))
+    mutations.addUpdateItemDownload(state, item({ downloadItemParts: [part({ bytesDownloaded: 900 })] }))
 
     expect(state.itemDownloads).toHaveLength(1)
     expect(state.itemDownloads[0].itemProgress).toBe(0.9)
