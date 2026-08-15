@@ -14,7 +14,7 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**254 tests, 0 failures.** The fix queue is empty.
+**255 tests, 0 failures.** The fix queue is empty.
 
 That is the target, not a permanent state: a newly found defect *should* make this number non-zero
 until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
@@ -67,17 +67,10 @@ asserting the English text would make every test a hostage of `strings/en-us.jso
 `entitiesPerShelf` and `shelvesPerPage` from `clientWidth`/`clientHeight`, so left alone the shelf
 collapses and no card is ever mounted.
 
-That makes render-level assertions on mounted cards **vacuous** — they would pass whether or not
-the data arrived. So `offline-library.spec.js` stubs the measurement and asserts on the data layer
-(`entities`, `totalEntities`, the `bookshelf-total-entities` event) instead. That is the layer the
-defect lives in, and the empty-state block is driven by `entities.length` anyway.
-
-Asserting on mounted card components here would be testing happy-dom's layout engine, not this app
-— the frontend equivalent of the `Handler(Looper.getMainLooper())` trap documented in the Android
-guide, where a test can look like it exercises code that never ran.
-
-If you need real layout, that is a browser-based test (Playwright/Cypress) and a different tool.
-Do not fake your way to a number and assert on it.
+Tests that exercise shelf virtualization must therefore define the container dimensions they need
+and assert the app's calculations and resulting DOM, not happy-dom's layout engine. Use realistic
+phone dimensions and keep the boundary explicit in the spec. A browser-based test is still needed
+for CSS layout, route transitions, or visual geometry that the DOM host does not calculate.
 
 **A data-layer assertion cannot tell you the screen is right.** `entities` and `totalEntities` were
 correct while the offline Library tab rendered nothing but a red notice: putting a card on screen
@@ -89,11 +82,12 @@ is a separate step, and `mountEntityCard` looks its shelf row up with
 only after the lookup succeeds. Clear `document.body` in `afterEach` when you use it: those
 assertions are document-wide, so a leftover row from a previous test would satisfy them.
 
-The card's *own* rendering still cannot be asserted. Cards are built with `new ComponentClass()`
-outside the test-utils tree, and `LazyBookCard`'s store computed is `this.$store || this.$nuxt.$store`
-- a standalone instance has neither here, so its render throws and `$el` is not an element. In the
-app `$nuxt` is on the Vue prototype and it renders normally. Asserting on card DOM would be
-asserting the harness's limits.
+Cards are built programmatically with `new ComponentClass()`, outside the test-utils tree. They
+must be created with the shelf as `parent`; this supplies the real Vue/Vuex context during their
+first render. A render error here is not a harmless harness limitation: it reproduced the app's
+initial offline-library failure, where `$nuxt` was not available yet and toggling list/grid only
+appeared to fix the shelf because replacement cards were created later. The harness therefore
+includes the store getters those cards use and render-level specs assert the actual card DOM.
 
 ## Characterization vs. defect spec
 

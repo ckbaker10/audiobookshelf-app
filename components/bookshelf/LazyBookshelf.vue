@@ -442,6 +442,28 @@ export default {
       }
       return entitiesPerShelfBefore < this.entitiesPerShelf // Books per shelf has changed
     },
+    nextRenderFrame() {
+      return new Promise((resolve) => {
+        if (typeof window.requestAnimationFrame === 'function') {
+          window.requestAnimationFrame(resolve)
+        } else {
+          setTimeout(resolve, 0)
+        }
+      })
+    },
+    async initSizeDataAfterLayout() {
+      // This component can mount while the Library route is still being laid out. Measuring in
+      // that tick produces a zero-sized shelf, which limits the initial list to only a few rows.
+      // Two frames let the route transition and its child layout reach their usable dimensions.
+      await this.$nextTick()
+      await this.nextRenderFrame()
+      await this.nextRenderFrame()
+
+      if (this._isDestroyed || this._isBeingDestroyed) return false
+
+      this.initSizeData()
+      return true
+    },
     async init() {
       if (this.isFirstInit) return
 
@@ -450,18 +472,18 @@ export default {
       this.localLibraryItems = (await this.$db.getLocalLibraryItems(this.currentLibraryMediaType)) || []
       console.log('Local library items loaded for lazy bookshelf', this.localLibraryItems.length)
 
+      if (!(await this.initSizeDataAfterLayout())) return
+
       // No server session, or no network to reach it with. Show what is on the device instead of
       // an empty shelf (#542), and do not fire a request that cannot succeed - the Home shelf has
       // always gated on all three of these (`user && currentLibraryId && networkConnected`).
       if (!this.user || !this.networkConnected) {
         this.isFirstInit = true
-        this.initSizeData()
         await this.setEntitiesFromLocal()
         return
       }
 
       this.isFirstInit = true
-      this.initSizeData()
       await this.loadPage(0)
       var lastBookIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
       this.mountEntites(0, lastBookIndex)
