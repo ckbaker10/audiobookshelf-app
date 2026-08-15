@@ -1,5 +1,25 @@
 import { CapacitorHttp } from '@capacitor/core'
 
+/**
+ * Raised when a 401 could not be recovered from.
+ *
+ * [credentialRejected] separates "the server refused this refresh token" - a 401 from
+ * `/auth/refresh`, or no stored token at all - from "the refresh request did not complete", which
+ * covers transport errors and 5xx. Only the first justifies logging the user out; the second is
+ * transient by definition, and treating it as a logout also clears the refresh token that would
+ * have restored the session on the next attempt.
+ *
+ * This mirrors the native client's policy in `ApiHandler.handleTokenRefresh`, so a session no
+ * longer survives or dies depending on which half of the app made the request.
+ */
+class RefreshFailure extends Error {
+  constructor(message, credentialRejected) {
+    super(message)
+    this.name = 'RefreshFailure'
+    this.credentialRejected = credentialRejected
+  }
+}
+
 export default function ({ store, $db, $socket }, inject) {
   const nativeHttp = {
     async request(method, _url, data, options = {}) {
@@ -73,14 +93,18 @@ export default function ({ store, $db, $socket }, inject) {
         const refreshToken = await $db.getRefreshToken(serverConnectionConfig.id)
         if (!refreshToken) {
           console.error('[nativeHttp] No refresh token available')
-          throw new Error('No refresh token available')
+          throw new RefreshFailure('No refresh token available', true)
         }
 
         // Attempt to refresh the token
         const newTokens = await this.refreshAccessToken(refreshToken, serverConnectionConfig.address)
         if (!newTokens?.accessToken) {
           console.error('[nativeHttp] Failed to refresh access token')
-          throw new Error('Failed to refresh access token')
+          // `rejected` distinguishes "the server refused this credential" from "the request did
+          // not complete". Only the first may end the session: signing the user out because the
+          // network dropped for one request also destroys the refresh token that would have
+          // restored the session silently.
+          throw new RefreshFailure('Failed to refresh access token', newTokens?.rejected === true)
         }
 
         // Update the store with new tokens
@@ -109,7 +133,10 @@ export default function ({ store, $db, $socket }, inject) {
       } catch (error) {
         console.error('[nativeHttp] Token refresh failed:', error)
 
-        // If refresh fails, redirect to login
+        // Only tear the session down when the credential was actually refused.
+        if (error instanceof RefreshFailure && !error.credentialRejected) {
+          throw error
+        }
         await this.handleRefreshFailure(serverConnectionConfig?.id)
         throw error
       }
@@ -140,13 +167,17 @@ export default function ({ store, $db, $socket }, inject) {
 
         if (response.status !== 200) {
           console.error('[nativeHttp] Token refresh request failed:', response.status)
-          return null
+          // Only a 401 means the server actually rejected the refresh token. Anything else - 5xx,
+          // a proxy error page, a gateway timeout - is a request that did not complete, and says
+          // nothing about whether the credential is still good.
+          return { rejected: response.status === 401 }
         }
 
         const userResponseData = response.data
         if (!userResponseData.user?.accessToken) {
           console.error('[nativeHttp] No access token in refresh response')
-          return null
+          // A 200 with an unusable body is a broken response, not a refused credential.
+          return { rejected: false }
         }
 
         console.log('[nativeHttp] Successfully refreshed access token')
@@ -156,8 +187,10 @@ export default function ({ store, $db, $socket }, inject) {
           refreshToken: userResponseData.user.refreshToken
         }
       } catch (error) {
+        // Transport failure: no network, DNS failure, TLS refusal, connection reset. The session
+        // must survive it - see handleTokenRefresh.
         console.error('[nativeHttp] Failed to refresh access token:', error)
-        return null
+        return { rejected: false }
       }
     },
 

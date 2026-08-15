@@ -14,36 +14,17 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**235 tests, 29 enabled failures.**
+**235 tests, 0 failures.** The fix queue is empty.
 
-Every failure is a contract that production does not currently meet. They are red on purpose: they
-state what should happen, and each fix belongs on its own branch.
+That is the target, not a permanent state: a newly found defect *should* make this number non-zero
+until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
 
-Reported upstream issues:
+Every one of the 29 failures this suite was built around has been fixed and the specs went green
+with their assertions untouched — five reported upstream issues (#542, #1711/#1712, #1335, #1274,
+#1870) and five defects found by scanning, including a transient-refresh logout that was the
+JavaScript twin of Android #1908/#1900/#1901.
 
-| Issue | Spec | Red |
-| --- | --- | ---: |
-| [#542](https://github.com/advplyr/audiobookshelf-app/issues/542) offline Library tab | `bookshelf/offline-library.spec.js` | 6 |
-| [#1711](https://github.com/advplyr/audiobookshelf-app/issues/1711) / [#1712](https://github.com/advplyr/audiobookshelf-app/issues/1712) detail page survives a library switch | `navigation/library-switch-detail-pages.spec.js` | 6 |
-| [#1335](https://github.com/advplyr/audiobookshelf-app/issues/1335) Switch Server/User disconnects | `navigation/switch-server-user.spec.js` | 4 |
-| [#1274](https://github.com/advplyr/audiobookshelf-app/issues/1274) OpenID demands HTTPS for the ABS server | `connection/openid-transport-policy.spec.js` | 3 |
-| [#1870](https://github.com/advplyr/audiobookshelf-app/issues/1870) Collections keeps the previous tab's count | `bookshelf/collections-state.spec.js` | 2 |
-
-Found by scanning, with no issue filed:
-
-| Defect | Spec | Red |
-| --- | --- | ---: |
-| A transient failure during token refresh logs the user out and clears the refresh token - the JS twin of Android #1908/#1900, still unfixed here | `plugins/native-http.spec.js` | 3 |
-| `$sanitizeFilename` throws `ReferenceError: Path is not defined` for any name over 240 chars - `Path` is never imported | `plugins/sanitize-helpers.spec.js` | 1 |
-| `$secondsToTimestampFull` renders `00:00:60`, rounding seconds before deriving minutes so the carry never happens | `plugins/format-helpers.spec.js` | 1 |
-| `TouchEvent.getSwipeDirection()` throws when the end event has not arrived - the null guard sits after the dereference it protects | `objects/touch-event.spec.js` | 1 |
-| A download queued with already-complete parts shows 0%, because progress is only ever derived when a part *changes* | `store/download-queue.spec.js` | 2 |
-
-The other 206 are green: the harness's own tests, the Home shelf characterization, the guards
-inside each defect file that pin the working path a fix must not break, and behaviour and
-edge-case coverage for the pure helpers, store actions/getters, mixins and `TouchEvent`.
-
-If you change the suite, re-run it and update these numbers from the run.
+If you change the suite, re-run it and update this number from the run.
 
 ## Conventions
 

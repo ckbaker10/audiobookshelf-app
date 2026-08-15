@@ -43,8 +43,13 @@ export default {
     }
   },
   mounted() {
-    // Reset data on logouts
-    this.$store.commit('libraries/reset')
+    // Reset data on logouts - but not when the user is only *choosing* another server. Arriving
+    // here from "Switch Server/User" is reversible: pressing back must leave the current session
+    // intact, and clearing the libraries store would strand it with no current library even
+    // though the user and server config survive.
+    if (!this.$route.query.switching) {
+      this.$store.commit('libraries/reset')
+    }
     this.$store.commit('setIsFirstLoad', true)
     this.init()
   }

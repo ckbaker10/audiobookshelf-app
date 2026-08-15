@@ -66,7 +66,8 @@ export default {
   data() {
     return {
       mediaIdStartingPlayback: null,
-      processingRemove: false
+      processingRemove: false,
+      leavingLibrary: false
     }
   },
   computed: {
@@ -135,8 +136,24 @@ export default {
           this.$eventBus.$emit('play-item', { libraryItemId: nextBookNotRead.id })
         }
       }
+    },
+    libraryChanged() {
+      // This collection belongs to the library that was just left, so leave rather than showing
+      // items from a library that is not selected - the same thing LazyBookshelf.libraryChanged
+      // does for a collections shelf the new library cannot show.
+      //
+      // The collection object is deliberately *not* cleared. Routing is asynchronous, so this
+      // component re-renders at least once before it unmounts, and a template built around
+      // `collection.books` would throw on the way out.
+      this.leavingLibrary = true
+      this.$router.replace('/bookshelf/collections')
     }
   },
-  mounted() {}
+  mounted() {
+    this.$eventBus.$on('library-changed', this.libraryChanged)
+  },
+  beforeDestroy() {
+    this.$eventBus.$off('library-changed', this.libraryChanged)
+  }
 }
 </script>

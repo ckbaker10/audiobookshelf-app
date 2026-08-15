@@ -191,6 +191,14 @@ export default {
         this.resetEntities()
         return
       }
+      if (!payload?.results) {
+        // The request failed, or answered a shape we cannot read. Without this the component stays
+        // uninitialized and publishes nothing, so the empty state never renders and the toolbar
+        // keeps whatever count the *previous* tab left there - the Collections symptom in #1870.
+        // Downloaded items are the useful fallback where there are any: see setEntitiesFromLocal.
+        this.setEntitiesFromLocal()
+        return
+      }
       if (payload && payload.results) {
         console.log('Received payload', payload)
         if (!this.initialized) {
@@ -215,6 +223,30 @@ export default {
             }
           }
         }
+      }
+    },
+    /**
+     * Presents downloaded items as the shelf's contents.
+     *
+     * Used when there is no server session, and as the fallback when a server fetch fails. Without
+     * it the Library tab is simply blank offline while the Home shelf shows the same downloads,
+     * which reads as a broken tab rather than a boundary (#542).
+     *
+     * Only meaningful for book entities - a collection or playlist has no local equivalent - so
+     * everything else initializes empty rather than pretending otherwise.
+     */
+    setEntitiesFromLocal() {
+      const localEntities = this.isBookEntity ? this.localLibraryItems || [] : []
+
+      this.entities = [...localEntities]
+      this.totalEntities = localEntities.length
+      this.totalShelves = Math.ceil(this.totalEntities / this.entitiesPerShelf)
+      this.initialized = true
+      this.$eventBus.$emit('bookshelf-total-entities', this.totalEntities)
+
+      if (this.totalEntities) {
+        const lastIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
+        this.mountEntites(0, lastIndex)
       }
     },
     async loadPage(page) {
@@ -306,7 +338,7 @@ export default {
         var lastBookIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
         this.mountEntites(0, lastBookIndex)
       } else {
-        // Local only
+        this.setEntitiesFromLocal()
       }
     },
     remountEntities() {
@@ -346,15 +378,19 @@ export default {
     },
     async init() {
       if (this.isFirstInit) return
+
+      // Read local storage first, unconditionally. These items are both the decoration applied to
+      // server entities and - offline, or when the fetch fails - the shelf's own contents.
+      this.localLibraryItems = (await this.$db.getLocalLibraryItems(this.currentLibraryMediaType)) || []
+      console.log('Local library items loaded for lazy bookshelf', this.localLibraryItems.length)
+
       if (!this.user) {
-        // Offline support not available
-        await this.resetEntities()
-        this.$eventBus.$emit('bookshelf-total-entities', 0)
+        // No server session. Show what is on the device instead of an empty shelf (#542).
+        this.isFirstInit = true
+        this.initSizeData()
+        this.setEntitiesFromLocal()
         return
       }
-
-      this.localLibraryItems = await this.$db.getLocalLibraryItems(this.currentLibraryMediaType)
-      console.log('Local library items loaded for lazy bookshelf', this.localLibraryItems.length)
 
       this.isFirstInit = true
       this.initSizeData()
