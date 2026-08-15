@@ -276,7 +276,7 @@ export function fakeEventBus() {
  */
 export function mountComponent(
   component,
-  { store, db, nativeHttp, eventBus, socket, router, localStore, route, data, propsData = {}, stubs = {}, platform = 'android' } = {}
+  { store, db, nativeHttp, eventBus, socket, router, localStore, route, data, attachTo, propsData = {}, stubs = {}, platform = 'android' } = {}
 ) {
   const $store = store || storeWith()
   const $db = db || fakeDb()
@@ -295,6 +295,11 @@ export function mountComponent(
 
   const wrapper = mount(componentUnderTest, {
     store: $store,
+    // Off-document by default. Pass `attachTo: document.body` for a component that reaches the
+    // real DOM - LazyBookshelf mounts its cards with document.getElementById('shelf-N'), and that
+    // lookup silently returns null for a detached tree, so the card layer looks fine while
+    // nothing renders.
+    ...(attachTo ? { attachTo } : {}),
     propsData,
     stubs: {
       'ui-btn': true,

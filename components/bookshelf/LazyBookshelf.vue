@@ -276,7 +276,7 @@ export default {
      * Only meaningful for book entities - a collection or playlist has no local equivalent - so
      * everything else initializes empty rather than pretending otherwise.
      */
-    setEntitiesFromLocal() {
+    async setEntitiesFromLocal() {
       const localEntities = this.isBookEntity ? this.localLibraryItems || [] : []
 
       this.showingLocalContent = true
@@ -286,10 +286,18 @@ export default {
       this.initialized = true
       this.$eventBus.$emit('bookshelf-total-entities', this.totalEntities)
 
-      if (this.totalEntities) {
-        const lastIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
-        this.mountEntites(0, lastIndex)
-      }
+      if (!this.totalEntities) return
+
+      // The shelf rows are a v-for over totalShelves, so they do not exist until Vue re-renders.
+      // mountEntityCard finds its row with document.getElementById(`shelf-N`) and returns early
+      // when it is missing, so mounting in this tick silently drops every card - which is what
+      // left the offline library showing nothing but the "not connected" notice.
+      //
+      // The server path never hit this because `await loadPage(0)` yields before it mounts.
+      await this.$nextTick()
+
+      const lastIndex = Math.min(this.totalEntities, this.shelvesPerPage * this.entitiesPerShelf)
+      this.mountEntites(0, lastIndex)
     },
     clearReconnectTimeout() {
       if (this.reconnectTimeout) {
@@ -448,7 +456,7 @@ export default {
       if (!this.user || !this.networkConnected) {
         this.isFirstInit = true
         this.initSizeData()
-        this.setEntitiesFromLocal()
+        await this.setEntitiesFromLocal()
         return
       }
 
