@@ -7,6 +7,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DeviceAndMediaTypeTest {
+  /**
+   * Note the third assertion: `application/octet-stream` counts as audio. That is deliberate in
+   * production - servers and SAF providers routinely fail to type `.m4b`/`.opus` and fall back to
+   * octet-stream, and rejecting it would make those files undownloadable - but it does mean the
+   * check is a filename-extension decision in disguise, and that any binary blob passes it. The
+   * downstream guard is `FolderScanner`, which is where a file that is not really audio has to be
+   * caught. Recorded here so the looseness is visible rather than implied.
+   */
   @Test
   fun `canonical audio mime types are detected`() {
     assertTrue(localFile("audio/mpeg").isAudioFile())

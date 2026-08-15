@@ -7,18 +7,19 @@ import com.audiobookshelf.app.data.MediaType
 import com.audiobookshelf.app.data.MediaTypeMetadata
 import com.audiobookshelf.app.models.DownloadItem
 import com.audiobookshelf.app.models.DownloadItemPart
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.unmockkObject
 import java.io.File
 import java.nio.file.Files
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -28,13 +29,14 @@ import org.junit.Test
  * itself is mocked here the same way `DownloadItemManagerTest` mocks it from the outside.
  */
 class IncompleteDownloadCleanupTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
   private lateinit var context: Context
   private lateinit var appFilesDir: File
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
     appFilesDir = Files.createTempDirectory("abs-idc-test").toFile()
     context = mockk(relaxed = true)

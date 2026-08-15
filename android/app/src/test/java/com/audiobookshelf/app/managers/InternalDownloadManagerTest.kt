@@ -1,9 +1,8 @@
 package com.audiobookshelf.app.managers
 
+import com.audiobookshelf.app.support.RecordingDownloadCallback
 import java.io.File
 import java.nio.file.Files
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -11,6 +10,7 @@ import org.junit.After
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -52,7 +52,7 @@ class InternalDownloadManagerTest {
                     .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
     )
     val destination = File(downloadDirectory, "book.part")
-    val callback = RecordingCallback()
+    val callback = RecordingDownloadCallback()
 
     InternalDownloadManager(destination, 6, callback, hasAvailableSpace = { true })
             .download(server.url("/interrupted").toString(), "token")
@@ -181,18 +181,125 @@ class InternalDownloadManagerTest {
     callback.awaitCompletion()
     val request = server.takeRequest()
 
-    assertEquals(
-            setOf("Accept-Encoding", "Authorization", "Host", "Connection", "User-Agent"),
-            request.headers.names()
+    // Asserted as "the custom header is absent, and the two headers download() *can* send are
+    // present". An earlier version asserted the exact header set including OkHttp's own Host,
+    // Connection and User-Agent, which made an OkHttp upgrade a test failure for a reason that
+    // has nothing to do with the contract under test.
+    assertNull(
+            "download() has no parameter through which a custom header could be supplied",
+            request.getHeader("X-Proxy-Auth")
     )
+    assertEquals("Bearer token", request.getHeader("Authorization"))
+    assertEquals("identity", request.getHeader("Accept-Encoding"))
+  }
+
+  // --- Transport cases beyond the Range matrix -------------------------------------------------
+
+  /**
+   * A redirect on the download URL. Reverse proxies in front of an audiobookshelf server redirect
+   * routinely (http->https, a path rewrite), and OkHttp follows them by default - what matters is
+   * that the `Authorization` header survives the hop to the *same* host, or every download behind
+   * such a proxy 401s.
+   */
+  @Test
+  fun `a same-host redirect is followed with the authorization header intact`() {
+    server.enqueue(
+            MockResponse().setResponseCode(302).setHeader("Location", "/moved/book.mp3")
+    )
+    server.enqueue(MockResponse().setResponseCode(200).setBody("abcd"))
+    val destination = File(downloadDirectory, "book.part")
+
+    val callback = download(destination, expectedSize = 4)
+    callback.awaitCompletion()
+
+    assertFalse(callback.failed)
+    assertArrayEquals("abcd".toByteArray(), destination.readBytes())
+    server.takeRequest() // the original request
+    val followed = server.takeRequest()
+    assertEquals("/moved/book.mp3", followed.path)
+    assertEquals("Bearer token", followed.getHeader("Authorization"))
+  }
+
+  /**
+   * A 401 mid-transfer. The token expired between queueing and downloading - a real case for a
+   * long queue. The failure must be reported and, critically, the 401's response body must not be
+   * left on disk as though it were the file.
+   */
+  @Test
+  fun `a 401 is reported as a failure and its body is not kept as the file`() {
+    server.enqueue(
+            MockResponse().setResponseCode(401).setBody("""{"error":"invalid token"}""")
+    )
+    val destination = File(downloadDirectory, "book.part")
+
+    val callback = download(destination, expectedSize = 4)
+    callback.awaitCompletion()
+
+    assertTrue("an unauthorized download is not a completed download", callback.failed)
+    assertEquals(
+            "the error body must not be written to the destination",
+            0L,
+            destination.length()
+    )
+  }
+
+  /**
+   * The oversize check on the *resume* path. `DownloadIntegrityTest` covers a body longer than
+   * expected on a fresh download; resuming adds the staging file's existing length to whatever
+   * arrives, so the overflow can come from the sum rather than from the response alone.
+   */
+  @Test
+  fun `a resumed download whose total exceeds the expected size fails`() {
+    server.enqueue(
+            MockResponse()
+                    .setResponseCode(206)
+                    .setHeader("Content-Range", "bytes 2-9/4")
+                    .setBody("cdefghij") // 2 existing + 8 = 10 bytes for an expected 4
+    )
+    val destination = File(downloadDirectory, "book.part").apply { writeText("ab") }
+
+    val callback = download(destination, expectedSize = 4)
+    callback.awaitCompletion()
+
+    assertTrue("a resume that overshoots the expected size must not report success", callback.failed)
+  }
+
+  /**
+   * Storage is checked *before* the body is consumed, not after. `storage rejection fails without
+   * consuming full response` already asserts the destination stays empty; this pins the stronger
+   * property that the space check is consulted at all on a chunked body of unknown length, which
+   * is the shape where a late check would already have written the whole file.
+   */
+  @Test
+  fun `storage availability is consulted before a chunked body is written`() {
+    server.enqueue(MockResponse().setChunkedBody("abcdefghij", 4))
+    val destination = File(downloadDirectory, "book.part")
+    var consulted = false
+
+    val callback = RecordingDownloadCallback()
+    InternalDownloadManager(
+                    destination,
+                    0,
+                    callback,
+                    hasAvailableSpace = {
+                      consulted = true
+                      false
+                    }
+            )
+            .download(server.url("/download").toString(), "token")
+    callback.awaitCompletion()
+
+    assertTrue("hasAvailableSpace must be consulted even when the length is unknown", consulted)
+    assertTrue(callback.failed)
+    assertEquals(0L, destination.length())
   }
 
   private fun download(
           destination: File,
           expectedSize: Long,
           hasAvailableSpace: () -> Boolean = { true }
-  ): RecordingCallback {
-    val callback = RecordingCallback()
+  ): RecordingDownloadCallback {
+    val callback = RecordingDownloadCallback()
     InternalDownloadManager(
                     destination,
                     expectedSize,
@@ -201,28 +308,5 @@ class InternalDownloadManagerTest {
             )
             .download(server.url("/download").toString(), "token")
     return callback
-  }
-
-  private class RecordingCallback : DownloadItemManager.InternalProgressCallback {
-    private val completion = CountDownLatch(1)
-    val progressUpdates = mutableListOf<Pair<Long, Long>>()
-    var failed = false
-      private set
-    var completionCount = 0
-      private set
-
-    override fun onProgress(totalBytesWritten: Long, progress: Long) {
-      progressUpdates += totalBytesWritten to progress
-    }
-
-    override fun onComplete(failed: Boolean) {
-      this.failed = failed
-      completionCount++
-      completion.countDown()
-    }
-
-    fun awaitCompletion() {
-      assertTrue("download callback timed out", completion.await(5, TimeUnit.SECONDS))
-    }
   }
 }

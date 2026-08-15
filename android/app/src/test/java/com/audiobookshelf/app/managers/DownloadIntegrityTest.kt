@@ -1,10 +1,9 @@
 package com.audiobookshelf.app.managers
 
+import com.audiobookshelf.app.support.RecordingDownloadCallback
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.nio.file.Files
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPOutputStream
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
@@ -57,8 +56,8 @@ class DownloadIntegrityTest {
     downloadDirectory.deleteRecursively()
   }
 
-  private fun download(destination: File, expectedSize: Long): RecordingCallback {
-    val callback = RecordingCallback()
+  private fun download(destination: File, expectedSize: Long): RecordingDownloadCallback {
+    val callback = RecordingDownloadCallback()
     InternalDownloadManager(destination, expectedSize, callback, hasAvailableSpace = { true })
             .download(server.url("/download").toString(), "token")
     return callback
@@ -260,31 +259,7 @@ class DownloadIntegrityTest {
     val callback = download(destination, expectedSize = 10)
     callback.awaitCompletion()
 
-    Thread.sleep(200) // give a second completion a chance to arrive
-    assertEquals(1, callback.completionCount)
+    callback.assertNoFurtherCompletion()
     assertTrue(callback.failed)
-  }
-
-  private class RecordingCallback : DownloadItemManager.InternalProgressCallback {
-    private val completion = CountDownLatch(1)
-    val progressUpdates = mutableListOf<Pair<Long, Long>>()
-    var failed = false
-      private set
-    var completionCount = 0
-      private set
-
-    override fun onProgress(totalBytesWritten: Long, progress: Long) {
-      progressUpdates += totalBytesWritten to progress
-    }
-
-    override fun onComplete(failed: Boolean) {
-      this.failed = failed
-      completionCount++
-      completion.countDown()
-    }
-
-    fun awaitCompletion() {
-      assertTrue("download callback timed out", completion.await(5, TimeUnit.SECONDS))
-    }
   }
 }

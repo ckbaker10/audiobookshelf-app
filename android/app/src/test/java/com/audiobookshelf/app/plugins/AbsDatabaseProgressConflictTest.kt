@@ -3,6 +3,7 @@ package com.audiobookshelf.app.plugins
 import com.audiobookshelf.app.data.LocalMediaProgress
 import com.audiobookshelf.app.data.localLibraryItem
 import com.audiobookshelf.app.managers.DbManager
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.getcapacitor.JSObject
 import com.getcapacitor.PluginCall
@@ -16,6 +17,7 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -41,12 +43,13 @@ import org.junit.Test
  * `TESTING.md` §6.1 as its own finding, with the full bisection.
  */
 class AbsDatabaseProgressConflictTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var db: DbManager
   private lateinit var plugin: AbsDatabase
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
     plugin = AbsDatabase()
   }
@@ -54,7 +57,6 @@ class AbsDatabaseProgressConflictTest {
   @After
   fun tearDown() {
     unmockkAll()
-    AbsTestEnvironment.reset()
   }
 
   /** A relaxed `PluginCall` whose two-arg `getString` returns the given params, else its default. */

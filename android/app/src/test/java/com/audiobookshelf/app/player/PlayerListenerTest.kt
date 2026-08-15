@@ -4,16 +4,17 @@ import com.audiobookshelf.app.data.PlaybackSession
 import com.audiobookshelf.app.data.PlayerState
 import com.audiobookshelf.app.managers.SleepTimerManager
 import com.audiobookshelf.app.media.MediaProgressSyncer
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import com.google.android.exoplayer2.PlaybackException
 import com.google.android.exoplayer2.Player
 import io.mockk.every
 import io.mockk.mockk
 import io.mockk.verify
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -22,13 +23,14 @@ import org.junit.Test
  * `@Before` and `@After` so this suite cannot leak state into (or absorb it from) another class.
  */
 class PlayerListenerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var pns: PlayerNotificationService
   private lateinit var player: Player
   private lateinit var listener: PlayerListener
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     PlayerListener.lastPauseTime = 0
     PlayerListener.lazyIsPlaying = false
     pns = mockk(relaxed = true)
@@ -92,10 +94,16 @@ class PlayerListenerTest {
   @Test
   fun `onIsPlayingChanged ignores a pause event that occurs while buffering`() {
     every { player.playbackState } returns Player.STATE_BUFFERING
+    val syncer = mockk<MediaProgressSyncer>(relaxed = true)
+    every { pns.mediaProgressSyncer } returns syncer
 
     listener.onIsPlayingChanged(false)
 
-    verify(exactly = 0) { pns.mediaProgressSyncer }
+    // Asserted against the syncer's own methods rather than against `pns.mediaProgressSyncer`
+    // being read. Verifying the property getter would break on any refactor that reads it for
+    // logging, without the behaviour under test having changed at all.
+    verify(exactly = 0) { syncer.pause(any()) }
+    verify(exactly = 0) { syncer.play(any()) }
     assertEquals(false, PlayerListener.lazyIsPlaying)
   }
 
@@ -103,10 +111,13 @@ class PlayerListenerTest {
   fun `onIsPlayingChanged ignores a redundant event matching the current lazy state`() {
     PlayerListener.lazyIsPlaying = true
     every { player.playbackState } returns Player.STATE_READY
+    val syncer = mockk<MediaProgressSyncer>(relaxed = true)
+    every { pns.mediaProgressSyncer } returns syncer
 
     listener.onIsPlayingChanged(true)
 
-    verify(exactly = 0) { pns.mediaProgressSyncer }
+    verify(exactly = 0) { syncer.play(any()) }
+    verify(exactly = 0) { syncer.pause(any()) }
   }
 
   @Test
@@ -141,6 +152,8 @@ class PlayerListenerTest {
     assertTrue(PlayerListener.lastPauseTime > 0)
     assertEquals(false, PlayerListener.lazyIsPlaying)
   }
+
+
 
   private fun events(vararg present: Int): Player.Events {
     val events = mockk<Player.Events>()

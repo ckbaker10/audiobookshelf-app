@@ -10,28 +10,30 @@ import com.audiobookshelf.app.data.playbackSession
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.player.PlayerNotificationService
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class MediaProgressSyncerTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var pns: PlayerNotificationService
   private lateinit var syncer: MediaProgressSyncer
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
     pns = mockk(relaxed = true)
     // Without this, Context.getSystemService(CONNECTIVITY_SERVICE) on a relaxed mock returns a
@@ -40,11 +42,6 @@ class MediaProgressSyncerTest {
     every { pns.getSystemService(Context.CONNECTIVITY_SERVICE) } returns
             mockk<ConnectivityManager>(relaxed = true)
     syncer = MediaProgressSyncer(pns, AbsTestEnvironment.apiHandler())
-  }
-
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   /** Sets the private `lastSyncTime` field without going through `start()`'s real Timer. */
@@ -111,7 +108,11 @@ class MediaProgressSyncerTest {
   fun `local session syncs to the server when connected to the same server the item belongs to`() {
     setLastSyncTime(5_000L)
     DeviceManager.serverConnectionConfig =
-            ServerConnectionConfig("srv-1", 0, "n", "https://x", "2.17.0", "u", "un", "t", null)
+            // 127.0.0.1:1 refuses immediately and deterministically. An earlier version used the
+            // bare hostname "https://x" and depended on DNS *failing* to resolve it, which is not
+            // true on a network with a wildcard resolver or a captive portal.
+            ServerConnectionConfig(
+                    "srv-1", 0, "n", "http://127.0.0.1:1", "2.17.0", "u", "un", "t", null)
     val session =
             playbackSession(mutableListOf(audioTrack(duration = 100.0)), currentTime = 10.0).apply {
               playMethod = 3

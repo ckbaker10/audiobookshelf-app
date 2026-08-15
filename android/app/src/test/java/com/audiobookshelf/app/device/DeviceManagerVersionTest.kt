@@ -1,38 +1,24 @@
 package com.audiobookshelf.app.device
 
 import com.audiobookshelf.app.data.ServerConnectionConfig
-import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockkStatic
 import io.mockk.slot
 import io.mockk.unmockkStatic
-import org.junit.After
+import com.audiobookshelf.app.support.AbsSingletonRule
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
-import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 class DeviceManagerVersionTest {
-  @Before
-  fun setUp() {
-    AbsTestEnvironment.reset()
-  }
+  @get:Rule val absEnvironment = AbsSingletonRule()
 
   private fun withServerVersion(version: String) {
     DeviceManager.serverConnectionConfig =
             ServerConnectionConfig("id", 0, "n", "https://x", version, "u", "un", "t", null)
-  }
-
-  /**
-   * `reset()` belongs here as well as in `@Before`: every suite in this package shares one Gradle
-   * test JVM, so state this class leaves on the `DeviceManager`/Paper singletons is inherited by
-   * whichever class runs next.
-   */
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   @Test
@@ -94,6 +80,37 @@ class DeviceManagerVersionTest {
     // change to it is deliberate rather than accidental.
     withServerVersion("2.26.0-beta")
     assertTrue(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.26.0"))
+  }
+
+  /**
+   * The comparison must be numeric, not lexicographic. `"2.9.0" < "2.10.0"` as *strings*, so a
+   * simplification to `serverVersion >= compareVersion` would invert this one case while leaving
+   * every other spec in this class green - which is exactly why it is pinned separately.
+   */
+  @Test
+  fun `a two-digit minor version compares numerically, not lexicographically`() {
+    withServerVersion("2.10.0")
+    assertTrue(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.9.0"))
+
+    withServerVersion("2.9.0")
+    assertFalse(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.10.0"))
+  }
+
+  @Test
+  fun `a fourth version component participates in the comparison`() {
+    withServerVersion("2.17.0.1")
+    assertTrue(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.17.0"))
+
+    withServerVersion("2.17.0")
+    assertFalse(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.17.0.1"))
+  }
+
+  @Test
+  fun `an empty component parses as zero rather than throwing`() {
+    withServerVersion("2..0")
+
+    assertTrue(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.0.0"))
+    assertFalse(DeviceManager.isServerVersionGreaterThanOrEqualTo("2.1.0"))
   }
 
   @Test

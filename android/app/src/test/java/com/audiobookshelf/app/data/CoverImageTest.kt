@@ -6,6 +6,7 @@ import android.graphics.ImageDecoder
 import android.provider.MediaStore
 import androidx.core.content.FileProvider
 import com.audiobookshelf.app.device.DeviceManager
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
@@ -20,6 +21,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -39,18 +41,18 @@ import org.junit.Test
  */
 @Suppress("DEPRECATION") // MediaStore.Images.Media.getBitmap(ContentResolver, Uri) is the pre-28 branch under test
 class CoverImageTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private val ctx: Context = mockk(relaxed = true)
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     AbsTestEnvironment.mockUriParse()
   }
 
   @After
   fun tearDown() {
     unmockkAll()
-    AbsTestEnvironment.reset()
   }
 
   // --- Crash specs: reproduce the reported bug -----------------------------------------------

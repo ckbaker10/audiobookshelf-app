@@ -11,6 +11,14 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class DownloadItemTest {
+  /**
+   * Instance state, not companion state. It was a `companion object var` that no test reset, so it
+   * carried across every class in the shared Gradle JVM - harmless here (the ids only have to be
+   * distinct within one item) but exactly the shared-mutable-static pattern the rest of this suite
+   * exists to police.
+   */
+  private var nextPartId = 0
+
   @Test
   fun `download finishes only when every part completed without failure or move`() {
     assertTrue(downloadItem(part(completed = true), part(completed = true)).isDownloadFinished)
@@ -127,8 +135,4 @@ class DownloadItemTest {
                   progress = if (completed) 100 else 0,
                   bytesDownloaded = if (completed) 10 else 0
           )
-
-  private companion object {
-    var nextPartId = 0
-  }
 }

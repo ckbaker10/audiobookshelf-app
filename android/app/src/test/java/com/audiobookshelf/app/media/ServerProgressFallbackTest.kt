@@ -10,16 +10,17 @@ import com.audiobookshelf.app.data.playbackSession
 import com.audiobookshelf.app.device.DeviceManager
 import com.audiobookshelf.app.managers.DbManager
 import com.audiobookshelf.app.player.PlayerNotificationService
+import com.audiobookshelf.app.support.AbsSingletonRule
 import com.audiobookshelf.app.support.AbsTestEnvironment
 import io.mockk.every
 import io.mockk.mockk
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
 
 /**
@@ -43,23 +44,19 @@ import org.junit.Test
  * that would be real data loss, and it is what any change here must not break.
  */
 class ServerProgressFallbackTest {
+  @get:Rule val absEnvironment = AbsSingletonRule()
+
   private lateinit var pns: PlayerNotificationService
   private lateinit var syncer: MediaProgressSyncer
   private lateinit var db: DbManager
 
   @Before
   fun setUp() {
-    AbsTestEnvironment.reset()
     db = DbManager()
     pns = mockk(relaxed = true)
     every { pns.getSystemService(Context.CONNECTIVITY_SERVICE) } returns
             mockk<ConnectivityManager>(relaxed = true)
     syncer = MediaProgressSyncer(pns, AbsTestEnvironment.apiHandler())
-  }
-
-  @After
-  fun tearDown() {
-    AbsTestEnvironment.reset()
   }
 
   private fun setLastSyncTime(millisAgo: Long) {
