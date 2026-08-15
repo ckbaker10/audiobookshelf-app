@@ -7,6 +7,9 @@ import { StatusBar, Style } from '@capacitor/status-bar'
 import { Clipboard } from '@capacitor/clipboard'
 import { Capacitor } from '@capacitor/core'
 import { formatDistance, format, addDays, isDate, setDefaultOptions } from 'date-fns'
+// $sanitizeFilename's truncation branch calls Path.extname/Path.basename. It had no import, so
+// any filename over MAX_FILENAME_LEN threw ReferenceError out of the download path.
+import Path from 'path'
 import * as locale from 'date-fns/locale'
 
 Vue.directive('click-outside', vClickOutside.directive)
@@ -136,12 +139,14 @@ Vue.prototype.$secondsToTimestamp = (seconds) => {
 }
 
 Vue.prototype.$secondsToTimestampFull = (seconds) => {
-  let _seconds = Math.round(seconds)
-  let _minutes = Math.floor(seconds / 60)
+  // Round first, then derive every component from the rounded total. Deriving minutes from the
+  // *unrounded* input meant the carry never happened, so 59.6s rendered as the invalid "00:00:60".
+  const totalSeconds = Math.round(seconds)
+  let _seconds = totalSeconds
+  let _minutes = Math.floor(totalSeconds / 60)
   _seconds -= _minutes * 60
   let _hours = Math.floor(_minutes / 60)
   _minutes -= _hours * 60
-  _seconds = Math.floor(_seconds)
   return `${_hours.toString().padStart(2, '0')}:${_minutes.toString().padStart(2, '0')}:${_seconds.toString().padStart(2, '0')}`
 }
 

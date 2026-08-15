@@ -228,12 +228,11 @@ export default {
      * @throws Will log a console error if the browser fails to open the URL and display errors via this.error to the user.
      */
     async clickLoginWithOpenId() {
-      // oauth standard requires https explicitly
-      if (!this.serverConfig.address.startsWith('https') && this.oauth.enforceHTTPs) {
-        console.warn(`[SSO] Oauth2 requires HTTPS`)
-        this.$toast.error(`SSO: The URL to the server must be https:// secured`)
-        return
-      }
+      // RFC 6749 §10.9 requires HTTPS for the *identity provider's* authorization endpoint, which
+      // is checked further down against the URL that provider returns. It says nothing about the
+      // transport to the audiobookshelf server that merely reports where that endpoint is, so an
+      // ABS instance on plain HTTP - a LAN address, or a tunnel terminating TLS elsewhere - is a
+      // valid setup and no longer refused here.
 
       // First request that we want to do oauth/openid and get the URL which a browser window should open
       const redirectUrl = await this.oauthRequest(this.serverConfig.address)

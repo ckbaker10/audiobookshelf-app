@@ -148,7 +148,10 @@ export default {
         items.push({
           icon: 'login',
           text: this.$strings.ButtonSwitchServerUser,
-          action: 'logout'
+          // Deliberately not 'logout'. Switching is a *reversible* trip to the connection screen:
+          // backing out must leave the current session exactly as it was. Only an explicit
+          // Disconnect, or authenticating against a different server, may replace it.
+          action: 'switchServerUser'
         })
       }
 
@@ -161,7 +164,12 @@ export default {
   methods: {
     async clickAction(action) {
       await this.$hapticsImpact()
-      if (action === 'logout') {
+      if (action === 'switchServerUser') {
+        // No logout: the user is choosing another server, not leaving this one. `switching` tells
+        // the connection screen not to tear down the libraries store it would normally reset.
+        this.show = false
+        this.$router.push('/connect?switching=1')
+      } else if (action === 'logout') {
         await this.logout()
         this.$router.push('/connect')
       } else if (action === 'openWebClient') {

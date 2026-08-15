@@ -100,6 +100,21 @@ export const mutations = {
     state.isModalOpen = val
   },
   addUpdateItemDownload(state, downloadItem) {
+    // Derive progress from the parts up front. Progress was previously only ever computed in
+    // updateDownloadItemPart, which runs when a part *changes* - so parts that were already on
+    // disk when the download was queued never reported, and an item whose work was already done
+    // sat at 0% looking stuck. Uses the same accounting as updateDownloadItemPart: actual bytes
+    // for completed parts, declared size for pending ones.
+    if (downloadItem.downloadItemParts?.length) {
+      let totalBytes = 0
+      let totalBytesDownloaded = 0
+      for (const dip of downloadItem.downloadItemParts) {
+        totalBytes += dip.completed ? Number(dip.bytesDownloaded) : Number(dip.fileSize)
+        totalBytesDownloaded += Number(dip.bytesDownloaded)
+      }
+      downloadItem.itemProgress = totalBytes > 0 ? Math.min(1, totalBytesDownloaded / totalBytes) : 0
+    }
+
     var index = state.itemDownloads.findIndex((i) => i.id == downloadItem.id)
     if (index >= 0) {
       state.itemDownloads.splice(index, 1, downloadItem)

@@ -75,6 +75,7 @@ export default {
     return {
       showMoreMenu: false,
       processing: false,
+      leavingLibrary: false,
       selectedLibraryItem: null,
       selectedEpisode: null,
       mediaIdStartingPlayback: null
@@ -155,22 +156,33 @@ export default {
       }
     },
     playlistUpdated(playlist) {
+      // Ignore updates for a library the user has already left; the page is unmounting.
+      if (this.leavingLibrary) return
       if (this.playlist.id !== playlist.id) return
       this.playlist = playlist
     },
     playlistRemoved(playlist) {
-      if (this.playlist.id === playlist.id) {
+      if (this.playlist?.id === playlist.id) {
         this.$router.replace('/bookshelf/playlists')
       }
+    },
+    libraryChanged() {
+      // See pages/collection/_id.vue. The playlist object is deliberately not cleared - routing is
+      // asynchronous and the template would throw on the re-render before unmount. The flag stops
+      // a late socket update repopulating a page that is on its way out.
+      this.leavingLibrary = true
+      this.$router.replace('/bookshelf/playlists')
     }
   },
   mounted() {
     this.$socket.$on('playlist_updated', this.playlistUpdated)
     this.$socket.$on('playlist_removed', this.playlistRemoved)
+    this.$eventBus.$on('library-changed', this.libraryChanged)
   },
   beforeDestroy() {
     this.$socket.$off('playlist_updated', this.playlistUpdated)
     this.$socket.$off('playlist_removed', this.playlistRemoved)
+    this.$eventBus.$off('library-changed', this.libraryChanged)
   }
 }
 </script>

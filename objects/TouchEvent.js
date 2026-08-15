@@ -29,6 +29,14 @@ export default class TouchEvent {
     }
 
     getSwipeDirection() {
+        // The end event is optional by design: the constructor's second argument defaults to null
+        // and setEndEvent() exists to supply it later, so "started but not yet ended" is a normal
+        // state. The guard below used to sit *after* these dereferences, which meant it could only
+        // ever catch an empty touch list - a missing end event threw instead.
+        if (!this.startEvent || !this.endEvent) {
+            return null
+        }
+
         let start = this.startEvent.changedTouches[0]
         let end = this.endEvent.changedTouches[0]
 
