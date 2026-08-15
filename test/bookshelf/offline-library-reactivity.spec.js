@@ -55,6 +55,23 @@ function mountLibrary({ user = { id: 'u1' }, networkConnected = true, localLibra
   return mounted
 }
 
+/**
+ * Runs [act], then lets the component's deferred reconnect timer fire.
+ *
+ * Fake timers are enabled only around the wait: `flush()` awaits a `setTimeout(0)`, so faking
+ * timers for a whole test freezes the helper every other assertion depends on.
+ */
+async function withDeferredRetry(act) {
+  vi.useFakeTimers()
+  try {
+    await act()
+    await vi.advanceTimersByTimeAsync(4100)
+  } finally {
+    vi.useRealTimers()
+  }
+  await flush()
+}
+
 /** Flips the store's connectivity flag, which is what the device listener does in production. */
 async function setNetwork($store, connected) {
   $store.state.networkConnected = connected
@@ -127,101 +144,81 @@ describe('Library tab reacts to the network dropping', () => {
 
 describe('Library tab recovers when the network returns', () => {
   it('reloads from the server once the connection is back', async () => {
-    vi.useFakeTimers()
-    try {
-      const { wrapper, $store } = mountLibrary({
-        networkConnected: false,
-        localLibraryItems: [localBook('local-1', 'Downloaded Book')],
-        responses: { '/api/libraries/lib-1/items': { results: [serverBook('s-1', 'From The Server')], total: 1 } }
-      })
-      await wrapper.vm.init()
-      await flush()
-      expect(titlesIn(wrapper.vm)).toEqual(['Downloaded Book'])
+    const { wrapper, $store } = mountLibrary({
+      networkConnected: false,
+      localLibraryItems: [localBook('local-1', 'Downloaded Book')],
+      responses: { '/api/libraries/lib-1/items': { results: [serverBook('s-1', 'From The Server')], total: 1 } }
+    })
+    await wrapper.vm.init()
+    await flush()
+    expect(titlesIn(wrapper.vm)).toEqual(['Downloaded Book'])
 
+    // Production defers the refetch: the Home shelf documents that fetching the instant the
+    // network reports connected "will often fail on Android".
+    await withDeferredRetry(async () => {
       $store.state.networkConnected = true
-      // Production defers the refetch: the Home shelf documents that fetching the instant the
-      // network reports connected "will often fail on Android".
-      await vi.advanceTimersByTimeAsync(5000)
-      await flush()
+    })
 
-      expect(titlesIn(wrapper.vm)).toEqual(['From The Server'])
-      wrapper.destroy()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(titlesIn(wrapper.vm)).toEqual(['From The Server'])
+    wrapper.destroy()
   })
 
   it('stays on downloaded items when the network returns but there is no session', async () => {
-    vi.useFakeTimers()
-    try {
-      const { wrapper, $store, $nativeHttp } = mountLibrary({
-        user: null,
-        networkConnected: false,
-        localLibraryItems: [localBook('local-1', 'Downloaded Book')]
-      })
-      await wrapper.vm.init()
-      await flush()
+    const { wrapper, $store, $nativeHttp } = mountLibrary({
+      user: null,
+      networkConnected: false,
+      localLibraryItems: [localBook('local-1', 'Downloaded Book')]
+    })
+    await wrapper.vm.init()
+    await flush()
 
+    await withDeferredRetry(async () => {
       $store.state.networkConnected = true
-      await vi.advanceTimersByTimeAsync(5000)
-      await flush()
+    })
 
-      expect(titlesIn(wrapper.vm)).toEqual(['Downloaded Book'])
-      expect($nativeHttp.requests).toEqual([])
-      wrapper.destroy()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(titlesIn(wrapper.vm)).toEqual(['Downloaded Book'])
+    expect($nativeHttp.requests).toEqual([])
+    wrapper.destroy()
   })
 
   it('does not refetch if the connection drops again before the retry fires', async () => {
-    vi.useFakeTimers()
-    try {
-      const { wrapper, $store, $nativeHttp } = mountLibrary({
-        networkConnected: false,
-        localLibraryItems: [localBook('local-1', 'A')],
-        responses: { '/api/libraries/lib-1/items': { results: [serverBook('s-1', 'X')], total: 1 } }
-      })
-      await wrapper.vm.init()
-      await flush()
-      const before = $nativeHttp.requests.length
+    const { wrapper, $store, $nativeHttp } = mountLibrary({
+      networkConnected: false,
+      localLibraryItems: [localBook('local-1', 'A')],
+      responses: { '/api/libraries/lib-1/items': { results: [serverBook('s-1', 'X')], total: 1 } }
+    })
+    await wrapper.vm.init()
+    await flush()
+    const before = $nativeHttp.requests.length
 
+    await withDeferredRetry(async () => {
       $store.state.networkConnected = true
-      await flush()
+      await Promise.resolve()
       $store.state.networkConnected = false
-      await vi.advanceTimersByTimeAsync(5000)
-      await flush()
+    })
 
-      expect($nativeHttp.requests).toHaveLength(before)
-      wrapper.destroy()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect($nativeHttp.requests).toHaveLength(before)
+    wrapper.destroy()
   })
 
   it('stops the pending retry when the component is destroyed', async () => {
     // A timer that fires into a destroyed component is how "cannot read property of undefined"
     // crashes get introduced by exactly this kind of change.
-    vi.useFakeTimers()
-    try {
-      const { wrapper, $store, $nativeHttp } = mountLibrary({
-        networkConnected: false,
-        responses: { '/api/libraries/lib-1/items': { results: [], total: 0 } }
-      })
-      await wrapper.vm.init()
-      await flush()
-      const before = $nativeHttp.requests.length
+    const { wrapper, $store, $nativeHttp } = mountLibrary({
+      networkConnected: false,
+      responses: { '/api/libraries/lib-1/items': { results: [], total: 0 } }
+    })
+    await wrapper.vm.init()
+    await flush()
+    const before = $nativeHttp.requests.length
 
+    await withDeferredRetry(async () => {
       $store.state.networkConnected = true
-      await flush()
+      await Promise.resolve()
       wrapper.destroy()
-      await vi.advanceTimersByTimeAsync(5000)
-      await flush()
+    })
 
-      expect($nativeHttp.requests).toHaveLength(before)
-    } finally {
-      vi.useRealTimers()
-    }
+    expect($nativeHttp.requests).toHaveLength(before)
   })
 })
 
@@ -269,25 +266,20 @@ describe('the shelf says when it is showing downloads rather than the library', 
   })
 
   it('clears the notice once the server list is back', async () => {
-    vi.useFakeTimers()
-    try {
-      const { wrapper, $store } = mountLibrary({
-        networkConnected: false,
-        localLibraryItems: [localBook('local-1', 'A')],
-        responses: { '/api/libraries/lib-1/items': { results: [serverBook('s-1', 'X')], total: 1 } }
-      })
-      await wrapper.vm.init()
-      await flush()
-      expect(wrapper.text()).toContain('MessageAudiobookshelfServerNotConnected')
+    const { wrapper, $store } = mountLibrary({
+      networkConnected: false,
+      localLibraryItems: [localBook('local-1', 'A')],
+      responses: { '/api/libraries/lib-1/items': { results: [serverBook('s-1', 'X')], total: 1 } }
+    })
+    await wrapper.vm.init()
+    await flush()
+    expect(wrapper.text()).toContain('MessageAudiobookshelfServerNotConnected')
 
+    await withDeferredRetry(async () => {
       $store.state.networkConnected = true
-      await vi.advanceTimersByTimeAsync(5000)
-      await flush()
+    })
 
-      expect(wrapper.text()).not.toContain('MessageAudiobookshelfServerNotConnected')
-      wrapper.destroy()
-    } finally {
-      vi.useRealTimers()
-    }
+    expect(wrapper.text()).not.toContain('MessageAudiobookshelfServerNotConnected')
+    wrapper.destroy()
   })
 })
