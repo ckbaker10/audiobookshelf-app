@@ -14,13 +14,23 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**26 tests, 6 enabled failures.**
+**58 tests, 21 enabled failures.**
 
-The six are the offline Library tab defect (`test/bookshelf/offline-library.spec.js`). They are red
-on purpose: they state the contract, and the fix belongs on its own branch. Everything else is
-green.
+Every failure is a contract for a reported upstream issue. They are red on purpose: they state what
+should happen, and each fix belongs on its own branch.
 
-If you change the suite, re-run it and update this number from the run.
+| Issue | Spec | Red |
+| --- | --- | ---: |
+| [#542](https://github.com/advplyr/audiobookshelf-app/issues/542) offline Library tab | `bookshelf/offline-library.spec.js` | 6 |
+| [#1711](https://github.com/advplyr/audiobookshelf-app/issues/1711) / [#1712](https://github.com/advplyr/audiobookshelf-app/issues/1712) detail page survives a library switch | `navigation/library-switch-detail-pages.spec.js` | 6 |
+| [#1335](https://github.com/advplyr/audiobookshelf-app/issues/1335) Switch Server/User disconnects | `navigation/switch-server-user.spec.js` | 4 |
+| [#1274](https://github.com/advplyr/audiobookshelf-app/issues/1274) OpenID demands HTTPS for the ABS server | `connection/openid-transport-policy.spec.js` | 3 |
+| [#1870](https://github.com/advplyr/audiobookshelf-app/issues/1870) Collections keeps the previous tab's count | `bookshelf/collections-state.spec.js` | 2 |
+
+The other 37 are green: the harness's own tests, the Home shelf characterization, and the guards
+inside each defect file that pin the working path a fix must not break.
+
+If you change the suite, re-run it and update these numbers from the run.
 
 ## Conventions
 
@@ -49,7 +59,9 @@ that quietly returns `undefined` would reproduce the bug inside the test framewo
 | `fakeDb({ localLibraryItems, localMediaProgress })` | Stands in for `plugins/db.js`. Filters by media type as the real bridge does, and records `calls` so "was local storage consulted at all?" is assertable. |
 | `fakeNativeHttp({ responses })` | **Rejects by default.** A test that forgets to queue a response models the offline case rather than an accidental success. Records `requests`. |
 | `storeWith({ user, networkConnected, currentLibraryId, localMediaProgress })` | Vuex store with the real shape. Those four inputs decide nearly every branch worth testing. |
-| `fakeEventBus()` / `fakeSocket()` | Record emits; let a test drive a server-push event without a server. |
+| `fakeEventBus()` / `fakeSocket()` | Record emits, expose `listenerCount(event)`, and let a test drive a server-push event without a server. |
+| `fakeRouter()` | Records `push`/`replace` instead of navigating. Recorded rather than throwing, because "did **not** navigate" is a contract too. |
+| `fakeLocalStore()` | Capacitor Preferences, backed by a real object so a write is visible to a later read. Records every call. |
 | `flush()` | Drains pending promises, then Vue's render queue. |
 
 `$strings` returns the key itself, not a translation. Tests assert *which* string was chosen —
@@ -73,6 +85,23 @@ guide, where a test can look like it exercises code that never ran.
 If you need real layout, that is a browser-based test (Playwright/Cypress) and a different tool.
 Do not fake your way to a number and assert on it.
 
+## Two ways these tests can lie, and how they are avoided
+
+Both were hit while writing the current specs, so they are not hypothetical.
+
+**A stubbed-out action makes a state assertion vacuous.** `switch-server-user.spec.js` asserts the
+user survives a screen change. If the test's `user/logout` merely recorded the call, the assertion
+would pass because nothing *could* have cleared the state - not because production chose to keep
+it. The fake therefore performs the same clearing `store/user.js` performs.
+
+**A side-effect assertion is vacuous while the subscription does not exist.** "Removes its
+listener on destroy" passes trivially when there is no listener: destroy changes nothing either
+way, so it stays green both today and after a fix that forgets to clean up. Assert
+`$eventBus.listenerCount(event)` directly instead.
+
+Before writing an assertion, ask what would have to be true for it to fail. If the answer is
+"nothing that could plausibly happen", it is not a test.
+
 ## Deliberately not covered
 
 - `LazyBookshelf`'s virtualised-scroll machinery — roughly 500 lines of geometry that needs real
@@ -87,8 +116,13 @@ Do not fake your way to a number and assert on it.
 test/
   support/harness.js          the fakes and the mount helper
   support/harness.spec.js     smoke tests for the harness itself
-  bookshelf/                  component tests, one file per behaviour cluster
+  bookshelf/                  shelf and library-view state
+  navigation/                 routing and lifecycle across screens
+  connection/                 server connection and auth
 ```
+
+One file per issue or behaviour cluster, named for what it covers rather than for the component it
+mounts - several specs mount `LazyBookshelf` for unrelated reasons.
 
 `harness.spec.js` exists because every other test trusts those fakes. A fake that quietly
 misbehaves should fail there rather than corrupt results elsewhere.

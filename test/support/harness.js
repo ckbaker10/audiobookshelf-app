@@ -68,11 +68,19 @@ export function fakeDb({ localLibraryItems = [], localMediaProgress = [] } = {})
  */
 export function fakeNativeHttp({ responses = {}, rejectWith = new Error('offline') } = {}) {
   const requests = []
-  const respond = (method) => async (url) => {
-    requests.push({ method, url })
+  // A queued array is consumed one entry per matching call, so a test can say "the first request
+  // to this path succeeds and the second fails" - needed for two-library and retry flows.
+  const queues = {}
+  const respond = (method) => async (url, data, options) => {
+    requests.push({ method, url, data, options })
     const match = Object.keys(responses).find((pattern) => url.includes(pattern))
     if (match === undefined) throw rejectWith
-    const response = responses[match]
+    let response = responses[match]
+    if (Array.isArray(response)) {
+      queues[match] = queues[match] ?? [...response]
+      if (!queues[match].length) throw new Error(`[harness] no queued response left for ${url}`)
+      response = queues[match].shift()
+    }
     if (response instanceof Error) throw response
     return response
   }
@@ -99,7 +107,8 @@ export function storeWith({
   currentLibraryMediaType = 'book',
   localMediaProgress = [],
   userSettings = {},
-  serverSettings = {}
+  serverSettings = {},
+  isPlayerOpen = false
 } = {}) {
   const settings = {
     mobileOrderBy: 'media.metadata.title',
@@ -117,12 +126,14 @@ export function storeWith({
       // Read directly by LazyBookshelf.init() to restore scroll position. Absent from the fake
       // store it throws inside init(), which would look like a defect in the component.
       lastBookshelfScrollData: {},
-      user: { user, settings },
+      showSideDrawer: false,
+      user: { user, settings, serverSettings: { version: '2.36.0', ...serverSettings }, serverConnectionConfig: null },
       libraries: { currentLibraryId, libraries: [] },
       globals: { localMediaProgress, bookshelfListView: false, isModalOpen: false }
     },
     getters: {
       getAltViewEnabled: () => false,
+      getIsPlayerOpen: () => isPlayerOpen,
       getServerSetting: () => (key) => serverSettings[key],
       'user/getUserSetting': () => (key) => settings[key],
       'user/getIsAdminOrUp': () => false,
@@ -141,6 +152,9 @@ export function storeWith({
       'globals/loadLocalMediaProgress': () => Promise.resolve()
     },
     mutations: {
+      setShowSideDrawer: (state, val) => {
+        state.showSideDrawer = val
+      },
       'libraries/setCurrentLibrary': (state, id) => {
         state.libraries.currentLibraryId = id
       }
@@ -160,12 +174,84 @@ export function fakeSocket() {
   return fakeEventBus()
 }
 
+/**
+ * Records router navigation instead of performing it.
+ *
+ * Both methods are recorded rather than throwing, because "did not navigate" is as much a contract
+ * here as "navigated to X" - #1335 is precisely a navigation that should *not* discard state, so a
+ * throwing default would make the negative case unassertable.
+ */
+export function fakeRouter({ path = '/bookshelf/library', name = 'bookshelf-library', query = {} } = {}) {
+  const navigations = []
+  return {
+    navigations,
+    push: (to) => navigations.push({ method: 'push', to }),
+    replace: (to) => navigations.push({ method: 'replace', to }),
+    go: (n) => navigations.push({ method: 'go', to: n }),
+    back: () => navigations.push({ method: 'back' }),
+    currentRoute: { path, name, query }
+  }
+}
+
+/**
+ * Stands in for `plugins/localStore.js` (Capacitor Preferences).
+ *
+ * Backed by a real object so a write is observable by a later read, and every call is recorded -
+ * "was the last library id cleared?" is the assertable half of a switch-server contract.
+ */
+export function fakeLocalStore({ lastLibraryId = null, userSettings = null, bookshelfListView = false } = {}) {
+  const calls = []
+  const store = { lastLibraryId, userSettings, bookshelfListView }
+  return {
+    calls,
+    store,
+    getLastLibraryId: async () => {
+      calls.push({ method: 'getLastLibraryId' })
+      return store.lastLibraryId
+    },
+    setLastLibraryId: async (id) => {
+      calls.push({ method: 'setLastLibraryId', id })
+      store.lastLibraryId = id
+    },
+    removeLastLibraryId: async () => {
+      calls.push({ method: 'removeLastLibraryId' })
+      store.lastLibraryId = null
+    },
+    getUserSettings: async () => {
+      calls.push({ method: 'getUserSettings' })
+      return store.userSettings
+    },
+    setUserSettings: async (settings) => {
+      calls.push({ method: 'setUserSettings', settings })
+      store.userSettings = { ...(store.userSettings || {}), ...settings }
+    },
+    getBookshelfListView: async () => {
+      calls.push({ method: 'getBookshelfListView' })
+      return store.bookshelfListView
+    },
+    setBookshelfListView: async (v) => {
+      calls.push({ method: 'setBookshelfListView', v })
+      store.bookshelfListView = v
+    }
+  }
+}
+
 /** A minimal event bus with the two methods the bookshelf components use, plus a record of emits. */
 export function fakeEventBus() {
   const emitted = []
   const handlers = {}
   return {
     emitted,
+    /**
+     * Number of live subscribers for [event].
+     *
+     * Exists so "this component subscribes" and "this component cleans up" can be asserted
+     * directly. Asserting them only through side effects is vacuous while the subscription does
+     * not exist yet: a destroy test would pass because nothing happened either way.
+     */
+    listenerCount(event) {
+      return (handlers[event] || []).length
+    },
     $emit(event, ...args) {
       emitted.push({ event, args })
       ;(handlers[event] || []).forEach((h) => h(...args))
@@ -188,14 +274,26 @@ export function fakeEventBus() {
  * chosen, not on its English text - asserting the text would make every test a hostage of
  * `strings/en-us.json`.
  */
-export function mountComponent(component, { store, db, nativeHttp, eventBus, socket, propsData = {}, stubs = {}, platform = 'android' } = {}) {
+export function mountComponent(
+  component,
+  { store, db, nativeHttp, eventBus, socket, router, localStore, route, data, propsData = {}, stubs = {}, platform = 'android' } = {}
+) {
   const $store = store || storeWith()
   const $db = db || fakeDb()
   const $nativeHttp = nativeHttp || fakeNativeHttp()
   const $eventBus = eventBus || fakeEventBus()
   const $socket = socket || fakeSocket()
+  const $router = router || fakeRouter()
+  const $localStore = localStore || fakeLocalStore()
+  const $route = route || { path: $router.currentRoute.path, name: $router.currentRoute.name, query: {}, fullPath: $router.currentRoute.path }
+  const toasts = []
 
-  const wrapper = mount(component, {
+  // Nuxt pages get their initial state from asyncData, which @vue/test-utils does not run. `data`
+  // lets a test supply that state directly, which is the only way to mount a detail page whose
+  // subject (a collection, a playlist) normally arrives from the server before render.
+  const componentUnderTest = data ? { ...component, data: () => ({ ...(component.data ? component.data() : {}), ...data }) } : component
+
+  const wrapper = mount(componentUnderTest, {
     store: $store,
     propsData,
     stubs: {
@@ -213,20 +311,26 @@ export function mountComponent(component, { store, db, nativeHttp, eventBus, soc
       $store,
       $platform: platform,
       $strings: new Proxy({}, { get: (_, key) => key }),
-      $localStore: {
-        getLastLibraryId: notStubbed('$localStore.getLastLibraryId'),
-        setUserSettings: async () => {}
-      },
+      $localStore,
+      $router,
+      $route,
       $showHideBookshelfToolbar: () => {},
       $setBookshelfScrollPosition: () => {},
       $getBookshelfScrollPosition: () => 0,
-      $toast: { error: notStubbed('$toast.error'), success: notStubbed('$toast.success') },
-      $router: { push: notStubbed('$router.push') },
-      $route: { query: {}, fullPath: '/bookshelf/library' }
+      $hapticsImpact: async () => {},
+      // Recorded rather than throwing: "the user was shown an error" is a contract several specs
+      // assert, and a throwing default would turn that into an unhandled rejection instead.
+      $toast: { error: (m) => toasts.push({ level: 'error', message: m }), success: (m) => toasts.push({ level: 'success', message: m }) },
+      $config: { version: '0.0.0-test' },
+      $formatNumber: (n) => String(n),
+      $formatDate: (d) => String(d),
+      // Mirrors plugins/i18n.js: returns the key so assertions stay independent of en-us.json,
+      // and substitutes positionally when subs are supplied.
+      $getString: (key, subs) => (Array.isArray(subs) && subs.length ? `${key}:${subs.join(',')}` : key)
     }
   })
 
-  return { wrapper, $store, $db, $nativeHttp, $eventBus, $socket }
+  return { wrapper, $store, $db, $nativeHttp, $eventBus, $socket, $router, $localStore, toasts }
 }
 
 /** Flushes pending promise callbacks, then Vue's render queue. */
