@@ -14,7 +14,7 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**247 tests, 0 failures.** The fix queue is empty.
+**254 tests, 0 failures.** The fix queue is empty.
 
 That is the target, not a permanent state: a newly found defect *should* make this number non-zero
 until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
@@ -78,6 +78,22 @@ guide, where a test can look like it exercises code that never ran.
 
 If you need real layout, that is a browser-based test (Playwright/Cypress) and a different tool.
 Do not fake your way to a number and assert on it.
+
+**A data-layer assertion cannot tell you the screen is right.** `entities` and `totalEntities` were
+correct while the offline Library tab rendered nothing but a red notice: putting a card on screen
+is a separate step, and `mountEntityCard` looks its shelf row up with
+`document.getElementById('shelf-N')` and returns early - logging, not throwing - when it is absent.
+
+`mountComponent(..., { attachTo: document.body })` makes that layer reachable, and
+`entityIndexesMounted` is the honest proxy for "the row was found", because an index is recorded
+only after the lookup succeeds. Clear `document.body` in `afterEach` when you use it: those
+assertions are document-wide, so a leftover row from a previous test would satisfy them.
+
+The card's *own* rendering still cannot be asserted. Cards are built with `new ComponentClass()`
+outside the test-utils tree, and `LazyBookCard`'s store computed is `this.$store || this.$nuxt.$store`
+- a standalone instance has neither here, so its render throws and `$el` is not an element. In the
+app `$nuxt` is on the Vue prototype and it renders normally. Asserting on card DOM would be
+asserting the harness's limits.
 
 ## Characterization vs. defect spec
 
