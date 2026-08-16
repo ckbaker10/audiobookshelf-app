@@ -137,6 +137,10 @@ export async function installRouteFixtures(
     playlists = [],
     libraries = DEFAULT_LIBRARIES,
     user = { id: 'u1', username: 'jane', type: 'user' },
+    /** Answer the first library-items request with this status instead, to drive the 401 path. */
+    itemsFailFirstWith = null,
+    /** Status for `POST <address>/auth/refresh`: 200 refreshes, 401 refuses, 5xx is transient. */
+    refreshStatus = 200,
     isOffline = () => false
   } = {}
 ) {
@@ -165,6 +169,25 @@ export async function installRouteFixtures(
 
   await context.route('**/socket.io/**', (route) => route.abort())
 
+  /**
+   * `GET <address>/ping` - the reachability check `ServerConnectForm.connectToServer` makes *before*
+   * authenticating (`:532`, `:699`). Unanswered, the connect flow decides the server is unreachable
+   * and never gets as far as `/api/authorize`, so every spec that walks through the connection
+   * screen silently tests the failure path instead.
+   *
+   * Note the path: it is `/ping`, not `/api/ping`.
+   */
+  await context.route(
+    '**/ping',
+    whenReachable((route) => route.fulfill({ json: { success: true } }))
+  )
+
+  /** `GET <address>/status` - which auth methods the connection screen should offer. */
+  await context.route(
+    '**/status',
+    whenReachable((route) => route.fulfill({ json: { app: 'audiobookshelf', isInit: true, language: 'en-us', authMethods: ['local'] } }))
+  )
+
   /** Paginates [all] the way the server does, so the shelf's paging is exercised rather than bypassed. */
   const paged = (all, query) => {
     const limit = Number(query.limit || all.length)
@@ -175,13 +198,37 @@ export async function installRouteFixtures(
   /** The library id out of `/api/libraries/<id>/...`. */
   const libraryIdOf = (path) => path.split('/')[3]
 
+  let itemsFailuresLeft = itemsFailFirstWith ? 1 : 0
+
   await context.route(
     '**/api/libraries/*/items*',
     whenReachable((route) => {
+      // Spent once, so the retry after a successful refresh gets a real answer - which is what
+      // makes "recovered from a 401" distinguishable from "never recovered".
+      if (itemsFailuresLeft > 0) {
+        itemsFailuresLeft--
+        return route.fulfill({ status: itemsFailFirstWith, json: { error: 'Unauthorized' } })
+      }
       const url = new URL(route.request().url())
       const query = Object.fromEntries(url.searchParams)
       const forLibrary = itemsByLibrary?.[libraryIdOf(url.pathname)] ?? libraryItems
       route.fulfill({ json: paged(forLibrary, query) })
+    })
+  )
+
+  /**
+   * `POST <address>/auth/refresh` - `plugins/nativeHttp.js:159-166`.
+   *
+   * The status is the whole point: only **401** means the server refused the credential and the
+   * session may be torn down. Anything else is a request that did not complete and says nothing
+   * about whether the credential is still good - the distinction the transient-refresh logout
+   * defect was about.
+   */
+  await context.route(
+    '**/auth/refresh',
+    whenReachable((route) => {
+      if (refreshStatus !== 200) return route.fulfill({ status: refreshStatus, json: { error: 'refresh failed' } })
+      route.fulfill({ json: { user: { ...user, accessToken: 'refreshed-access-token', refreshToken: 'refreshed-refresh-token' } } })
     })
   )
 

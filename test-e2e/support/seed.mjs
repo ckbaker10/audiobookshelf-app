@@ -65,7 +65,7 @@ export const localBooks = (count) => Array.from({ length: count }, (_, i) => loc
  * two offline states the Library tab behaves differently in: a device that has a session to restore
  * and one that does not. Both are ordinary - the second is a fresh install, or a logout.
  */
-export function deviceData({ connected = true, serverAddress = SERVER_ADDRESS } = {}) {
+export function deviceData({ connected = true, serverAddress = SERVER_ADDRESS, deviceSettings = {} } = {}) {
   const config = {
     id: 'scc-1',
     index: 0,
@@ -81,7 +81,10 @@ export function deviceData({ connected = true, serverAddress = SERVER_ADDRESS } 
     serverConnectionConfigs: [config],
     lastServerConnectionConfigId: connected ? config.id : null,
     currentLocalPlaybackSession: null,
-    deviceSettings: {}
+    // `getAltViewEnabled` returns **true** when `deviceSettings` is absent entirely and the stored
+    // `enableAltView` otherwise (`store/index.js:74-77`), so an empty object is not the same as no
+    // object - it is how a spec gets the *non*-alt layout.
+    deviceSettings
   }
 }
 
@@ -91,12 +94,16 @@ export function deviceData({ connected = true, serverAddress = SERVER_ADDRESS } 
  * `addInitScript` rather than an `evaluate` after navigation: the layout reads device data on mount,
  * so a seed applied afterwards would be a page too late and the first assertion would race it.
  */
-export async function seedDevice(context, { downloads = [], connected = true } = {}) {
+export async function seedDevice(context, { downloads = [], connected = true, deviceSettings = {}, refreshToken = 'test-refresh-token' } = {}) {
   await context.addInitScript(
-    ([device, items]) => {
+    ([device, items, token]) => {
       localStorage.setItem('device', device)
       localStorage.setItem('localLibraryItems', items)
+      // `AbsDatabaseWeb.getRefreshToken` reads `refresh_token_<configId>`. Without it, a 401 is a
+      // rejected credential before any refresh is attempted ("No refresh token available", thrown
+      // with `credentialRejected: true`), so the refresh path cannot be reached at all.
+      if (token) localStorage.setItem('refresh_token_scc-1', token)
     },
-    [JSON.stringify(deviceData({ connected })), JSON.stringify(downloads)]
+    [JSON.stringify(deviceData({ connected, deviceSettings })), JSON.stringify(downloads), refreshToken]
   )
 }

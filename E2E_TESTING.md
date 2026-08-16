@@ -115,7 +115,7 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**50 specs, 0 failures.**
+**74 specs, 0 failures.**
 
 The suite was written against the offline row/grid parity defect and measured it at full size before
 the fix landed:
@@ -158,14 +158,23 @@ honour — the same trap the parent plan flags for faking `$platform` into `'and
 
 One project, `web`. Not here, and not by omission:
 
-- **A live server.** These specs are offline-first; the one online leg is a `page.route()` handler.
-  Booting a real Audiobookshelf for a card count is cost without coverage.
+- **A live server.** Everything is fixtures; the auth, refresh and connect flows are driven by
+  `page.route()` handlers rather than a booted Audiobookshelf. Real JWT rotation against a real
+  server remains uncovered.
 - **The Android WebView tier.** Planned in `AI_Planning/audiobookshelf/e2e-testing-plan.md` as
   Tier 2. It needs a device and covers the native bridge seam, which nothing here touches.
-- **Auth and switch-server flows.** They need a real socket and real JWT rotation. `pages/account.vue`
-  redirects to `/connect` when `socketConnected` is false, and socket.io is not something
-  `page.route()` fakes convincingly — so it is aborted outright and these specs cover what the app
-  does without one, rather than pretending.
+- **Anything socket-gated.** socket.io is aborted rather than faked, so `pages/account.vue` (and with
+  it *logout*), `item/_id`, `add-podcast`, the episode tables and the connection indicator are out.
+  These specs cover what the app does without a live socket, rather than pretending to have one.
+
+**Switch-server is *not* in that last group**, despite an earlier version of this file saying so.
+Neither `pages/connect.vue` nor `SideDrawer` reads `socketConnected` — only the logout half of the
+drawer needs a socket, because it lands on the account page. The #1335 journey is covered end to end
+in `switch-server.spec.mjs`. Check for the gate before assuming it.
+
+- **Downloading, folder selection, and local playback.** `AbsDownloaderWeb` has no methods at all,
+  `AbsFileSystemWeb.selectFolder()` returns undefined, and `AbsAudioPlayer` branches on `local_` and
+  does nothing. Downloads can be *seeded* and browsed, never performed or played.
 
 ## Conventions
 
@@ -175,10 +184,11 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
    changing behaviour to satisfy a test. A `data-testid`, or a web-only bridge reading a
    `localStorage` key it already writes, changes nothing a user can observe. The boundary: if
    removing the hook would change what the app *does*, it is not a hook and #4 applies.
-   Currently eight attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
-   `bookshelf-filter`, `bookshelf-sort`, and the three option lists `filter-option`, `order-option`,
-   `library-option`, each carrying `data-value` and `data-selected`) and one seedable key
-   (`localLibraryItems`).
+   Currently ten attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
+   `bookshelf-filter`, `bookshelf-sort`, `drawer-action`, `server-config`, and the three option
+   lists `filter-option`, `order-option`, `library-option`, each carrying `data-value` and
+   `data-selected`) and one seedable key (`localLibraryItems`). Several elements needed no hook at
+   all — the app bar's `aria-label`s and the nav bar's `href`s are already stable.
 7. **Prefer the ids the app already has.** Cards are `book-card-N` and the scroll container is
    `#bookshelf-wrapper`. Both are structural, both are already selected on by the unit specs, and
    neither is a `data-testid` that had to be added. Add a hook only where the alternative is a
@@ -222,6 +232,20 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
 19. **Load online, then go offline.** Offline emulation does not survive a navigation, so
     `setOffline(true)` before `goto` silently produces an online page. This tier can only model a
     connection that dropped while a screen was open — never an app that started offline.
+20. **Never assert that the app *cleared* seeded storage.** `addInitScript` re-runs on every
+    navigation, and some teardowns end in `window.location.href = …` — `handleRefreshFailure` does.
+    The reload re-seeds `device` and the refresh token, so storage shows a healthy session moments
+    after the app destroyed it, and the assertion passes against a teardown that really happened.
+    Assert where the app *navigated* instead; a redirect is the one signal re-seeding cannot forge.
+21. **Fixture every endpoint on the path, not just the interesting one.** The connect flow pings
+    `<address>/ping` before authenticating (`ServerConnectForm.vue:532`, `:699`) — note `/ping`, not
+    `/api/ping`. Unanswered, the app decides the server is unreachable and never reaches
+    `/api/authorize`, so a spec about authentication silently exercises the failure path instead.
+    When a flow does less than expected, check the request log before suspecting the app.
+22. **Read the branch before asserting the default.** `getAltViewEnabled` returns **true** when
+    `deviceSettings` is absent and the stored flag otherwise, so an empty object and a missing object
+    are different states. Defaults that live in a getter's guard clause are easy to invert by
+    accident.
 
 ## The harness
 
@@ -240,6 +264,10 @@ test-e2e/
     library-filter-sort.spec.mjs    filter, sort, direction toggle
     entity-shelves.spec.mjs         series, collections, playlists
     library-switch.spec.mjs         switching library from the app bar
+    switch-server.spec.mjs          the #1335 drawer -> connect journey
+    shelf-layout.spec.mjs           alt view, and rotating the device
+    series-books-and-scroll.spec.mjs  the series shelf, scroll restore
+    auth-refresh.spec.mjs           401 -> refresh, and the failure taxonomy
 ```
 
 **Everything here is `.mjs`, and it has to be.** The package is CommonJS, so Playwright loads a `.js`
