@@ -3,6 +3,21 @@ import { defineConfig, devices } from '@playwright/test'
 const PORT = Number(process.env.E2E_PORT || 4173)
 
 /**
+ * Escape hatch for machines that cannot download Playwright's own Chromium.
+ *
+ * `cdn.playwright.dev` is the only source for the Chrome-for-Testing build this version pins, and
+ * it is blocked on some networks. Rather than leave the suite unrunnable there, these let a system
+ * browser stand in - see E2E_TESTING.md, "When the browser will not download".
+ *
+ * Unset by default, so the normal path is unaffected and nobody is silently testing against a
+ * different browser than CI does.
+ */
+const systemBrowser = {
+  ...(process.env.E2E_BROWSER_CHANNEL ? { channel: process.env.E2E_BROWSER_CHANNEL } : {}),
+  ...(process.env.E2E_BROWSER_EXECUTABLE ? { launchOptions: { executablePath: process.env.E2E_BROWSER_EXECUTABLE } } : {})
+}
+
+/**
  * Browser tier for the frontend.
  *
  * Scope is deliberately one project. The Android WebView project and the live-server mode described
@@ -37,7 +52,8 @@ export default defineConfig({
         // Real phone geometry is the point. `LazyBookshelf.initSizeData` derives entities-per-shelf
         // from the measured width and `bookWidth` reads `window.innerWidth` separately, so a
         // desktop viewport silently tests a layout no user has.
-        ...devices['Pixel 5']
+        ...devices['Pixel 5'],
+        ...systemBrowser
       }
     }
   ],

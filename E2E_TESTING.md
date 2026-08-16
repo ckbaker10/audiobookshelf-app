@@ -12,15 +12,103 @@ npx playwright test --config test-e2e/playwright.config.mjs --headed
 npx playwright test --config test-e2e/playwright.config.mjs -g "row view"
 ```
 
-First run needs a browser: `npx playwright install chromium`.
+## Install
+
+Two pieces, and they fail in different ways. The **runner** is an ordinary npm dependency; the
+**browser** is a ~200 MB binary fetched from Microsoft's CDN at install time, and that fetch is what
+breaks on restricted networks.
+
+```bash
+npm ci                            # 1. the runner - @playwright/test is already in devDependencies
+npx playwright install chromium   # 2. the browser
+```
+
+That is the whole happy path. `npm ci` needs nothing special; step 2 downloads three things into
+`~/.cache/ms-playwright/`:
+
+| Component | Version pinned by Playwright 1.62.1 | Path |
+| --- | --- | --- |
+| Chrome for Testing | 151.0.7922.34 (`chromium` build v1234) | `chromium-1234` |
+| Chrome Headless Shell | 151.0.7922.34 | `chromium_headless_shell-1234` |
+| FFmpeg | v1011 (video capture only) | `ffmpeg-1011` |
+
+Chromium only — the other engines would triple the download for no coverage, since the app ships in
+an Android WebView, which is Chromium.
+
+Useful flags:
+
+```bash
+npx playwright install chromium --dry-run     # print URLs, versions and target paths; downloads nothing
+npx playwright install chromium --only-shell  # headless shell only, smaller; enough for CI
+npx playwright install --with-deps chromium   # also apt-installs the shared libraries (needs sudo)
+npx playwright install --list                 # what is already on this machine
+```
+
+On a bare Linux box the browser will not launch without its shared libraries. `--with-deps` is the
+supported way to get them and is what `.github/workflows/e2e-web.yml` uses.
+
+### When the browser will not download
+
+This is not hypothetical: the specs in this directory were written on a machine where
+`cdn.playwright.dev` was unreachable, and none of them have ever run. The symptom is a 30 s timeout
+per attempt:
+
+```
+Error: Request to https://cdn.playwright.dev/builds/cft/151.0.7922.34/linux64/chrome-linux64.zip
+timed out after 30000ms
+```
+
+Worth knowing before you start guessing: for this version the Chrome-for-Testing build has **one**
+source. FFmpeg has Microsoft fallback mirrors, Chromium does not — so `install` can appear to make
+partial progress and still fail on the part you need. `npm i @playwright/browser-chromium` is not a
+way around it either; that package shells out to the same downloader.
+
+In rough order of effort:
+
+**1. Longer timeout, if the connection is merely slow.**
+
+```bash
+PLAYWRIGHT_DOWNLOAD_CONNECTION_TIMEOUT=180000 npx playwright install chromium
+```
+
+**2. A mirror or proxy, if your network has one.**
+
+```bash
+PLAYWRIGHT_DOWNLOAD_HOST=https://your-mirror.example.com npx playwright install chromium
+HTTPS_PROXY=http://proxy.example.com:8080 npx playwright install chromium
+```
+
+`PLAYWRIGHT_CHROMIUM_DOWNLOAD_HOST` overrides Chromium alone; `PLAYWRIGHT_CDN_MIRRORS` takes a list.
+
+**3. A system browser instead.** The config reads two variables so this needs no file edit:
+
+```bash
+# a channel Playwright knows how to find: chrome, chrome-beta, chrome-dev, chrome-canary,
+# msedge, msedge-beta, chromium-tip-of-tree
+E2E_BROWSER_CHANNEL=chrome npm run test:e2e
+
+# or point straight at a binary
+E2E_BROWSER_EXECUTABLE=/snap/bin/chromium npm run test:e2e
+```
+
+On Ubuntu, `sudo snap install chromium` currently gives 151.0.7922.108 against Playwright's pinned
+151.0.7922.34 — close enough that a mismatch is unlikely to be what breaks a spec. Set
+`PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` on `npm ci` to stop it retrying the download you are working
+around.
+
+**This is a fallback, not a supported configuration.** CI runs Playwright's pinned build, so a
+system browser means you and CI are testing against different binaries. Reproduce anything surprising
+on the pinned build before believing it.
+
+**4. Copy `~/.cache/ms-playwright/` from a machine that has it.** Same OS and architecture, same
+Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**16 specs, never run.** `cdn.playwright.dev` was unreachable from the machine they were written
-on, so no browser could be downloaded and not one assertion has executed. The config loads and all
-16 collect; that is all that is known. Treat the first real run as a debugging session and start it
-with `smoke.spec.js` — if the build-and-serve story is wrong, everything else times out in a way
-that looks like an application defect.
+**16 specs, never run.** No browser could be downloaded on the machine they were written on — see
+above. The config loads and all 16 collect; that is all that is known. Treat the first real run as a
+debugging session and start it with `smoke.spec.js` — if the build-and-serve story is wrong,
+everything else times out in a way that looks like an application defect.
 
 Delete this section once the suite has run.
 
