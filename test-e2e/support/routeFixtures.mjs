@@ -74,20 +74,40 @@ export const authorizePayload = (user) => ({
  * half-working socket would let a spec assert against a connection state the app never really
  * reaches. Aborting states the boundary: these specs cover what the app does without a live socket.
  */
-export async function installRouteFixtures(context, { libraryItems = [], user = { id: 'u1', username: 'jane', type: 'user' } } = {}) {
+export async function installRouteFixtures(context, { libraryItems = [], user = { id: 'u1', username: 'jane', type: 'user' }, isOffline = () => false } = {}) {
+  /**
+   * Route handlers run *before* the network stack, so `context.setOffline(true)` does not reach
+   * them - a fulfilled request succeeds while the browser is offline. Without this check the app
+   * authenticates and loads its library from a server it is supposed to be unable to see, and every
+   * "offline" spec quietly tests the online path.
+   *
+   * `internetdisconnected` is the error a real unreachable server produces, so the app's failure
+   * handling takes the same branch it takes on a device.
+   */
+  const whenReachable = (handler) => (route) => (isOffline() ? route.abort('internetdisconnected') : handler(route))
+
   await context.route('**/socket.io/**', (route) => route.abort())
 
-  await context.route('**/api/libraries/*/items*', (route) => {
-    const query = Object.fromEntries(new URL(route.request().url()).searchParams)
-    const start = Number(query.page || 0) * Number(query.limit || libraryItems.length)
-    const limit = Number(query.limit || libraryItems.length)
-    const page = libraryItems.slice(start, start + limit)
-    route.fulfill({ json: libraryItemsPayload(page, libraryItems.length, query) })
-  })
+  await context.route(
+    '**/api/libraries/*/items*',
+    whenReachable((route) => {
+      const query = Object.fromEntries(new URL(route.request().url()).searchParams)
+      const start = Number(query.page || 0) * Number(query.limit || libraryItems.length)
+      const limit = Number(query.limit || libraryItems.length)
+      const page = libraryItems.slice(start, start + limit)
+      route.fulfill({ json: libraryItemsPayload(page, libraryItems.length, query) })
+    })
+  )
 
-  await context.route('**/api/authorize', (route) => route.fulfill({ json: authorizePayload(user) }))
+  await context.route(
+    '**/api/authorize',
+    whenReachable((route) => route.fulfill({ json: authorizePayload(user) }))
+  )
 
-  await context.route('**/api/libraries', (route) => route.fulfill({ json: { libraries: [{ id: 'lib-1', name: 'Main', mediaType: 'book' }] } }))
+  await context.route(
+    '**/api/libraries',
+    whenReachable((route) => route.fulfill({ json: { libraries: [{ id: 'lib-1', name: 'Main', mediaType: 'book' }] } }))
+  )
 }
 
 export { serverBook }

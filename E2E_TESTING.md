@@ -49,21 +49,31 @@ supported way to get them and is what `.github/workflows/e2e-web.yml` uses.
 
 ### When the browser will not download
 
-This is not hypothetical: the specs in this directory were written on a machine where
-`cdn.playwright.dev` was unreachable, and none of them have ever run. The symptom is a 30 s timeout
-per attempt:
+The symptom is a 30 s timeout per attempt, which reads like a blocked CDN:
 
 ```
 Error: Request to https://cdn.playwright.dev/builds/cft/151.0.7922.34/linux64/chrome-linux64.zip
 timed out after 30000ms
 ```
 
-Worth knowing before you start guessing: for this version the Chrome-for-Testing build has **one**
-source. FFmpeg has Microsoft fallback mirrors, Chromium does not — so `install` can appear to make
-partial progress and still fail on the part you need. `npm i @playwright/browser-chromium` is not a
-way around it either; that package shells out to the same downloader.
+**On this machine it was IPv6, and `RES_OPTIONS=no-aaaa` is the fix** — hence the prefix on the
+commands above. The CDN resolves to an AAAA record that the host cannot route, Node tries it first
+and waits out the timeout rather than falling back to IPv4. Nothing about the CDN is blocked, which
+is why the failure is so misleading: `curl` may well succeed while `npx playwright install` does not,
+because they disagree about address-family preference.
 
-In rough order of effort:
+Try that before anything else:
+
+```bash
+RES_OPTIONS=no-aaaa npx playwright install chromium
+```
+
+Worth knowing if it is *not* that: for this version the Chrome-for-Testing build has **one** source.
+FFmpeg has Microsoft fallback mirrors, Chromium does not — so `install` can appear to make partial
+progress and still fail on the part you need. `npm i @playwright/browser-chromium` is not a way
+around it either; that package shells out to the same downloader.
+
+Then, in rough order of effort:
 
 **1. Longer timeout, if the connection is merely slow.**
 
@@ -105,12 +115,21 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**16 specs, never run.** No browser could be downloaded on the machine they were written on — see
-above. The config loads and all 16 collect; that is all that is known. Treat the first real run as a
-debugging session and start it with `smoke.spec.js` — if the build-and-serve story is wrong,
-everything else times out in a way that looks like an application defect.
+**16 specs, 3 failures.** The fix queue is the row/grid parity defect, and the browser is the tier
+that measures it at full size:
 
-Delete this section once the suite has run.
+| Offline Library tab, no session | Reachable by scrolling |
+| --- | --- |
+| grid (catalogue) view | **10 of 24** downloads |
+| row (list) view | **8 of 24** downloads |
+
+Row view reaches fewer than grid, and neither reaches the library — the reported symptom, at a
+Pixel 5 viewport with real CSS. The unit suite states the same contract at
+`test/bookshelf/offline-library-parity.spec.js`; the fix belongs on `fix-offline-library-parity`.
+
+The equivalent specs with a **saved session** pass: `scroll()` tops the window up when `user` is
+truthy, so everything is reachable. That is the shape of the defect, not an inconsistency — see the
+unit spec's KDoc for the two mechanisms.
 
 ## Why this tier exists
 
@@ -122,7 +141,18 @@ unit testing reaches:
 | --- | --- |
 | `LazyBookshelf`'s virtualisation geometry | `initSizeData` measures `clientWidth`/`clientHeight`. Under happy-dom both are 0, so `entitiesPerShelf` collapses and the numbers under test never exist. |
 | Whether a mounted card is *visible* | `entities` and `totalEntities` were correct while the offline shelf rendered nothing but a red notice. Mounting a card and putting it on screen are separate steps. |
-| Real connectivity transitions | `context.setOffline()` drives `@capacitor/network`'s web implementation, which reads `navigator.onLine` and listens for the window `online`/`offline` events. Nothing is faked. |
+| Real connectivity transitions | `context.setOffline()` flips `navigator.onLine` and fires the window `offline` event, which is exactly what `@capacitor/network`'s web implementation listens for. The app's own `networkConnected` follows. Nothing is faked — but see the ordering constraint below. |
+
+**Offline emulation does not survive a navigation.** `setOffline(true)` followed by `page.goto()`
+lands on a page reporting `navigator.onLine === true`, and the app then behaves as if connected.
+Verified in Chromium 151. So the specs load the page **online and then take it offline**, which
+models *the connection dropping while the Library tab is open* — the scenario
+`LazyBookshelf`'s `networkConnected` watcher exists for.
+
+**Cold-booting the app offline is therefore not reachable in a browser.** The unit suite covers it,
+by calling `init()` with `networkConnected: false`. If you find yourself reaching for
+`addInitScript` to force `navigator.onLine`, that is manufacturing a state the browser will not
+honour — the same trap the parent plan flags for faking `$platform` into `'android'`.
 
 ## Scope, and what is deliberately absent
 
@@ -164,16 +194,34 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
 
 ```
 test-e2e/
-  playwright.config.mjs    .mjs because the package is CommonJS - an ESM .js config fails to load
+  playwright.config.mjs    projects, viewport, retries: 0
   scripts/serve-dist.mjs   static server for dist/, with the 200.html fallback
   support/
-    fixtures.js            phone context, the `library` fixture, the scroll sweep
-    seed.js                localStorage builders: device data and downloads
-    routeFixtures.js       /api handlers, with capture provenance in the header
+    fixtures.mjs           phone context, the `library` fixture, the scroll sweep
+    seed.mjs               localStorage builders: device data and downloads
+    routeFixtures.mjs      /api handlers, with capture provenance in the header
+    dist.mjs               resolving a URL path to a file in dist/
   web/
-    smoke.spec.js
-    offline-library-parity.spec.js
+    smoke.spec.mjs
+    offline-library-parity.spec.mjs
 ```
+
+**Everything here is `.mjs`, and it has to be.** The package is CommonJS, so Playwright loads a `.js`
+config through `require` and an ESM one fails at `exports is not defined`; and a `.js` spec is
+transformed as CJS, which then cannot `import` an `.mjs` helper. One extension throughout is the only
+combination that holds.
+
+**Two ways the app gets served, deliberately.** Online specs use the HTTP server; offline specs are
+served the same files through `route.fulfill`, because `setOffline(true)` blocks *all* network,
+localhost included, and the bundle would never load. That is not a workaround — on a device the web
+assets ship in the APK and Capacitor serves them from `http://localhost`, so they are local and
+always available. What a phone loses is the *server*, which is what `setOffline` still takes away
+here. `support/dist.mjs` is shared by both paths so they cannot disagree about what the app is.
+
+**API fixtures check the offline flag themselves.** Route handlers run before the network stack, so a
+fulfilled request succeeds while the browser is offline. Without that check the app authenticates
+against a server it is supposed to be unable to see, and every offline spec quietly tests the online
+path — which is exactly what happened on the first run here.
 
 **Seeding.** `seed.js` writes two keys through `addInitScript`, before any page script runs — a seed
 applied after navigation is a page too late, because `layouts/default.vue` reads device data on
@@ -229,3 +277,12 @@ app does when a socket connects and then drops.
 **`AbsDatabaseWeb` is not `AbsDatabase.kt`.** The web bridge is an ordinary JavaScript object
 reading `localStorage`; the Android bridge is Kotlin over a real database. They can drift, and
 nothing in this suite would notice. That seam is Tier 2's job.
+
+**"Offline" here always means a connection that dropped**, never an app that started that way — see
+the ordering constraint above. The difference matters: `init()` and the `networkConnected` watcher
+are separate code paths, and this suite only ever exercises the second.
+
+**A route handler that forgets the offline check turns an offline spec green for the wrong reason.**
+It happened on the first run: the app authenticated and loaded its library while the browser was
+offline, so the shelf showed the server's answer and nothing failed. If an offline spec starts
+passing after a fixture change, check that the app is still actually cut off.

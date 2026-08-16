@@ -1,4 +1,4 @@
-import { test, expect, indexesReachableByScrolling, serverBook } from '../support/fixtures.js'
+import { test, expect, indexesReachableByScrolling, serverBook } from '../support/fixtures.mjs'
 
 /**
  * Offline, the row (list) view shows fewer downloads than the catalogue (grid) view.
@@ -118,7 +118,7 @@ test.describe('offline Library tab, geometry', () => {
 })
 
 test.describe('recovering the connection', () => {
-  test('reloads the full library from the server once the network returns', async ({ library, page, context }) => {
+  test('reloads the full library from the server once the network returns', async ({ library, page }) => {
     // The shelf defers its refetch by 4s, because the Home shelf records that fetching the moment
     // the network reports connected "will often fail on Android". Nothing below that timer can
     // observe this, which is why it is here rather than in the unit suite.
@@ -127,7 +127,7 @@ test.describe('recovering the connection', () => {
 
     expect(await publishedTotal(page)).toBe(DOWNLOADS)
 
-    await context.setOffline(false)
+    await library.goOnline()
     await expect(page.locator('[data-testid="bookshelf-total"]')).toHaveText(/60/, { timeout: 15_000 })
     await expect(page.locator('[data-testid="offline-notice"]')).toBeHidden()
   })

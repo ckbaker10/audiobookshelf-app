@@ -1,4 +1,4 @@
-import { test, expect } from '../support/fixtures.js'
+import { test, expect } from '../support/fixtures.mjs'
 
 /**
  * The build serves, boots, and routes.
@@ -19,12 +19,17 @@ test.describe('the static build', () => {
     expect(response?.status()).toBe(200)
   })
 
-  test('redirects the root at the connect screen when no server is configured', async ({ page }) => {
-    // `pages/index.vue` redirects to /bookshelf in asyncData; with no session the app ends at
-    // /connect. The chain is client-side, so this also proves the bundle loaded and Vue took over.
+  test('redirects the root at the bookshelf', async ({ page }) => {
+    // `pages/index.vue` redirects to /bookshelf in asyncData, and that is where it stops. It was
+    // written here as `/` -> `/bookshelf` -> `/connect`, which is wrong: nothing sends an
+    // unauthenticated visitor to the connect screen, because `middleware/authenticated.js` is
+    // referenced by no page and never runs. The bookshelf without a session is a real state - it is
+    // what shows downloads offline - so this asserts it rather than the guard that does not exist.
+    //
+    // The redirect is client-side, so this also proves the bundle loaded and Vue took over.
     await page.goto('/')
 
-    await expect(page).toHaveURL(/\/connect/)
+    await expect(page).toHaveURL(/\/bookshelf/)
   })
 
   test('renders the connect screen rather than an empty shell', async ({ page }) => {
