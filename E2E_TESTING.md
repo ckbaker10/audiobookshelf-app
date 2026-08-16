@@ -115,21 +115,21 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**16 specs, 3 failures.** The fix queue is the row/grid parity defect, and the browser is the tier
-that measures it at full size:
+**16 specs, 0 failures.**
 
-| Offline Library tab, no session | Reachable by scrolling |
-| --- | --- |
-| grid (catalogue) view | **10 of 24** downloads |
-| row (list) view | **8 of 24** downloads |
+The suite was written against the offline row/grid parity defect and measured it at full size before
+the fix landed:
 
-Row view reaches fewer than grid, and neither reaches the library — the reported symptom, at a
-Pixel 5 viewport with real CSS. The unit suite states the same contract at
-`test/bookshelf/offline-library-parity.spec.js`; the fix belongs on `fix-offline-library-parity`.
+| Offline Library tab, no session | Before | After |
+| --- | --- | --- |
+| grid (catalogue) view | 10 of 24 downloads | **24 of 24** |
+| row (list) view | 8 of 24 downloads | **24 of 24** |
 
-The equivalent specs with a **saved session** pass: `scroll()` tops the window up when `user` is
-truthy, so everything is reachable. That is the shape of the defect, not an inconsistency — see the
-unit spec's KDoc for the two mechanisms.
+Row view reached fewer than grid and neither reached the library. Fixed in `LazyBookshelf.scroll`
+and `handleScroll`; the specs went green with their assertions untouched.
+
+Re-run `npm run generate` before `npm run test:e2e` after any change to app code — this tier runs
+against the built bundle, so a stale `dist/` tests the previous version and says nothing.
 
 ## Why this tier exists
 

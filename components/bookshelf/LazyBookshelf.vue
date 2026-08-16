@@ -340,15 +340,21 @@ export default {
       var lastBookIndex = lastShelfIndex * this.entitiesPerShelf + this.entitiesPerShelf
       lastBookIndex = Math.min(this.totalEntities, lastBookIndex)
 
-      var firstBookPage = Math.floor(firstBookIndex / this.booksPerFetch)
-      var lastBookPage = Math.floor(lastBookIndex / this.booksPerFetch)
-      if (!this.pagesLoaded[firstBookPage]) {
-        console.log('Must load next batch', firstBookPage, 'book index', firstBookIndex)
-        this.loadPage(firstBookPage)
-      }
-      if (!this.pagesLoaded[lastBookPage]) {
-        console.log('Must load last next batch', lastBookPage, 'book index', lastBookIndex)
-        this.loadPage(lastBookPage)
+      // Downloads are all in memory already - there is no next page to fetch, and no server to
+      // fetch it from. Asking anyway sent a request that could only fail, and the failure path
+      // re-enters `setEntitiesFromLocal`, which re-mounts the *first* window on top of the one the
+      // user had scrolled to. Every scroll cost a doomed request and undid part of the scroll.
+      if (!this.showingLocalContent) {
+        var firstBookPage = Math.floor(firstBookIndex / this.booksPerFetch)
+        var lastBookPage = Math.floor(lastBookIndex / this.booksPerFetch)
+        if (!this.pagesLoaded[firstBookPage]) {
+          console.log('Must load next batch', firstBookPage, 'book index', firstBookIndex)
+          this.loadPage(firstBookPage)
+        }
+        if (!this.pagesLoaded[lastBookPage]) {
+          console.log('Must load last next batch', lastBookPage, 'book index', lastBookIndex)
+          this.loadPage(lastBookPage)
+        }
       }
 
       // Remove entities out of view
@@ -499,7 +505,12 @@ export default {
     },
     scroll(e) {
       if (!e || !e.target) return
-      if (!this.user) return
+      // A shelf showing downloads is virtualised exactly like a server one: `setEntitiesFromLocal`
+      // mounts only the first screenful and scrolling is what mounts the rest. Gating that on
+      // `user` alone meant a device with no session could never reach past the initial window, so
+      // the library ended at whatever happened to fit - and row view, at one book per shelf, fit
+      // fewer than grid. That is the whole of the reported "row view shows less items".
+      if (!this.user && !this.showingLocalContent) return
       var { scrollTop } = e.target
       this.handleScroll(scrollTop)
     },
