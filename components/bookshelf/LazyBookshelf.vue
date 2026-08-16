@@ -7,7 +7,7 @@
       </div>
     </template>
 
-    <div v-if="showingLocalContent" class="w-full flex items-center justify-center py-2">
+    <div v-if="showingLocalContent" data-testid="offline-notice" class="w-full flex items-center justify-center py-2">
       <span class="material-symbols text-error text-lg">cloud_off</span>
       <p class="pl-2 text-error text-sm">{{ $strings.MessageAudiobookshelfServerNotConnected }}</p>
     </div>

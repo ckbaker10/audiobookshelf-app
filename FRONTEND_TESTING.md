@@ -14,10 +14,16 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**263 tests, 0 failures.** The fix queue is empty.
+**278 tests, 5 failures.** The fix queue is `bookshelf/offline-library-parity.spec.js`.
 
-That is the target, not a permanent state: a newly found defect *should* make this number non-zero
-until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
+Offline, the row (list) view reaches fewer downloads than the catalogue (grid) view — 9 of 24
+against 10 of 24 at a phone viewport, neither being the whole library. Two mechanisms, described in
+that file's KDoc: `scroll()` returns early with no session, and scrolling *with* a cached session
+fires a request that cannot succeed and re-mounts the first window on top of the scrolled one. The
+fix belongs on `fix-offline-library-parity`.
+
+Zero failures is the target, not a permanent state: a newly found defect *should* make this number
+non-zero until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
 
 Every one of the 29 failures this suite was built around has been fixed and the specs went green
 with their assertions untouched — five reported upstream issues (#542, #1711/#1712, #1335, #1274,
@@ -35,13 +41,22 @@ If you change the suite, re-run it and update this number from the run.
 
 ## Conventions
 
-1. **Component tests, not e2e.** Mount a component with fake plugins, assert what it renders and
-   what it asks for. No running Nuxt server, no browser, no device. Same reasoning as the Android
-   suite's host-JVM rule.
+1. **Component tests, not e2e — in this directory.** Mount a component with fake plugins, assert
+   what it renders and what it asks for. No running Nuxt server, no browser, no device. Same
+   reasoning as the Android suite's host-JVM rule.
+
+   The browser tier now exists alongside it, in `test-e2e/` with its own conventions — see
+   `E2E_TESTING.md`. The boundary: if a question can be answered by mounting one component, it
+   belongs here, because a failing e2e spec is harder to diagnose than a failing component spec.
+   Go up a tier only for what this one structurally cannot see — real measured layout, real
+   connectivity transitions, and whether a mounted card is actually visible.
 2. **A known defect is an enabled failing test, never `.skip`.** The failure count is the fix
    queue.
 3. **Assert the contract, not the observed behaviour.** Write what *should* happen and let it fail.
-4. **Do not change production code to make a test pass.**
+4. **Do not change production code to make a test pass.** A *test hook* — a `data-testid`, or a
+   web-only bridge reading a key it already writes — is not that: it changes nothing a user can
+   observe. The test is whether removing it would change what the app does. `E2E_TESTING.md`
+   convention #6 states the boundary and lists every hook that exists.
 5. **Test names are load-bearing.** If deleting the assertion would leave the name still "true",
    the name overclaims.
 
@@ -63,6 +78,7 @@ that quietly returns `undefined` would reproduce the bug inside the test framewo
 | `fakeEventBus()` / `fakeSocket()` | Record emits, expose `listenerCount(event)`, and let a test drive a server-push event without a server. |
 | `fakeRouter()` | Records `push`/`replace` instead of navigating. Recorded rather than throwing, because "did **not** navigate" is a contract too. |
 | `fakeLocalStore()` | Capacitor Preferences, backed by a real object so a write is visible to a later read. Records every call. |
+| `stubShelfGeometry(vm, dims)` | Replaces `LazyBookshelf.initSizeData()` with fixed dimensions, **keeping** the list-view branch (`entitiesPerShelf = 1`). Do not use it in a spec that is about geometry — define `clientWidth`/`clientHeight` and let the real method run. |
 | `flush()` | Drains pending promises, then Vue's render queue. |
 
 `$strings` returns the key itself, not a translation. Tests assert *which* string was chosen —
@@ -135,7 +151,11 @@ Before writing an assertion, ask what would have to be true for it to fail. If t
 ## Deliberately not covered
 
 - `LazyBookshelf`'s virtualised-scroll machinery — roughly 500 lines of geometry that needs real
-  measurements to mean anything.
+  measurements to mean anything. **Partly covered now:** `offline-library-parity.spec.js` supplies
+  the measurements instead of stubbing past them (`clientWidth`/`clientHeight` plus
+  `window.innerWidth`, which `bookWidth` reads separately) and drives real scroll events through
+  `#bookshelf-wrapper`. That reaches the index arithmetic. It does not reach CSS layout, so whether
+  a mounted card is *visible* is still a browser question.
 - iOS, and anything device-bound.
 - The Capacitor bridges themselves. `plugins/db.js` is a thin pass-through to native code that the
   Android suite covers from the other side.

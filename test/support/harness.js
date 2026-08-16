@@ -173,6 +173,13 @@ export function storeWith({
       setServerSettings: (state, settings) => {
         state.user.serverSettings = settings
       },
+      // Committed by LazyBookshelf.beforeDestroy, but only when a `#bookshelf-wrapper` element
+      // exists. Absent from the store, a spec that supplies that element - the one the shelf binds
+      // its scroll listener to - dies on teardown with "unknown mutation type" instead of failing
+      // on its own assertion. Performs the real store's write so a later read is honest.
+      setLastBookshelfScrollData: (state, { scrollTop, path, name }) => {
+        state.lastBookshelfScrollData[name] = { scrollTop, path }
+      },
       'libraries/setCurrentLibrary': (state, id) => {
         state.libraries.currentLibraryId = id
       },
@@ -389,6 +396,36 @@ export function mountComponent(
   })
 
   return { wrapper, $store, $db, $nativeHttp, $eventBus, $socket, $router, $localStore, toasts }
+}
+
+/**
+ * Replaces `LazyBookshelf.initSizeData()` with fixed dimensions.
+ *
+ * happy-dom reports every element as zero-sized, so the real measurement collapses `entitiesPerShelf`
+ * to 1 and `shelvesPerPage` to 2 regardless of view mode - no card is ever asked to mount and a
+ * render assertion passes whether or not the data arrived.
+ *
+ * **The one branch the stub must keep.** Production forces `entitiesPerShelf = 1` in list view
+ * (`LazyBookshelf.vue:433`) and computes it from the measured width otherwise. Four specs previously
+ * inlined this stub with a flat `entitiesPerShelf = 4`, which handed both view modes identical
+ * geometry - deleting the only variable the row/grid parity defect lives in, while one of them set
+ * `bookshelfListView = true` and then overrode the sizing that list view exists to change.
+ *
+ * A spec that is *about* geometry should not use this at all: define `clientWidth`/`clientHeight`
+ * on the element and let the real method run. See `offline-library-parity.spec.js`.
+ */
+export function stubShelfGeometry(vm, { bookshelfWidth = 1000, bookshelfHeight = 800, entitiesPerShelf = 4, shelvesPerPage = 4 } = {}) {
+  vm.initSizeData = function () {
+    this.bookshelfWidth = bookshelfWidth
+    this.bookshelfHeight = bookshelfHeight
+    this.entitiesPerShelf = this.showBookshelfListView ? 1 : entitiesPerShelf
+    this.shelvesPerPage = shelvesPerPage
+    // Derived as production derives it, so a spec that changes the window size does not silently
+    // keep fetching a page sized for the old one.
+    this.booksPerFetch = Math.ceil((this.shelvesPerPage * this.entitiesPerShelf) / 20) * 20
+    if (this.totalEntities) this.totalShelves = Math.ceil(this.totalEntities / this.entitiesPerShelf)
+  }
+  return vm
 }
 
 /** Flushes pending promise callbacks, then Vue's render queue. */

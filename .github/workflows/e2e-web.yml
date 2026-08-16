@@ -1,0 +1,73 @@
+name: E2E web tests
+
+# Browser tier for the frontend. Separate from `frontend-tests.yml` because it needs things that
+# job deliberately does not: a static build (`nuxt generate`) and a Chromium download. Keeping them
+# apart means the unit suite stays a seconds-long job that never waits on a browser.
+#
+# No KVM, no Android SDK, no emulator - this is a plain SPA in a desktop-hosted Chromium at a phone
+# viewport. The Android WebView tier described in AI_Planning/audiobookshelf/e2e-testing-plan.md is
+# not in CI and is not meant to be yet.
+on:
+  push:
+    paths:
+      - 'components/**'
+      - 'pages/**'
+      - 'layouts/**'
+      - 'store/**'
+      - 'plugins/**'
+      - 'mixins/**'
+      - 'test-e2e/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'nuxt.config.js'
+      - '.github/workflows/e2e-web.yml'
+  pull_request:
+    paths:
+      - 'components/**'
+      - 'pages/**'
+      - 'layouts/**'
+      - 'store/**'
+      - 'plugins/**'
+      - 'mixins/**'
+      - 'test-e2e/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'nuxt.config.js'
+      - '.github/workflows/e2e-web.yml'
+
+jobs:
+  e2e-web:
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout sources
+        uses: actions/checkout@v3
+
+      - name: use Node.js 20.x
+        uses: actions/setup-node@v3
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: install dependencies
+        run: npm ci
+
+      # Chromium only. The other two engines would triple the download for no coverage: the app
+      # ships in an Android WebView, which is Chromium.
+      - name: install Chromium
+        run: npx playwright install --with-deps chromium
+
+      # Built as its own step so a build failure reads as a build failure rather than as a test
+      # timeout inside whichever spec ran first.
+      - name: build the static app
+        run: npm run generate
+
+      - name: run e2e web tests
+        run: npm run test:e2e
+
+      - name: upload report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7

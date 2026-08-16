@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import LazyBookshelf from '@/components/bookshelf/LazyBookshelf.vue'
-import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush } from '../support/harness'
+import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush, stubShelfGeometry } from '../support/harness'
 
 /**
  * The Library tab must stay useful when connectivity changes *while it is open*.
@@ -44,13 +44,7 @@ function mountLibrary({ user = { id: 'u1' }, networkConnected = true, localLibra
   // See offline-library.spec.js: happy-dom reports zero-sized elements, so the real sizing method
   // collapses the shelf and any render assertion would be vacuous. Assertions here are on the data
   // layer and on the one piece of markup that does not depend on measurement.
-  mounted.wrapper.vm.initSizeData = function () {
-    this.bookshelfWidth = 1000
-    this.bookshelfHeight = 800
-    this.entitiesPerShelf = 4
-    this.shelvesPerPage = 4
-    this.booksPerFetch = 20
-  }
+  stubShelfGeometry(mounted.wrapper.vm)
 
   return mounted
 }

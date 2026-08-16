@@ -1,6 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import LazyBookshelf from '@/components/bookshelf/LazyBookshelf.vue'
-import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush } from '../support/harness'
+import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush, stubShelfGeometry } from '../support/harness'
 
 /**
  * Offline, the Library tab must actually put cards on the shelf.
@@ -59,15 +59,9 @@ function mountLibrary({ user = null, networkConnected = false, localLibraryItems
   })
 
   // happy-dom reports zero-sized elements, so the real measurement collapses the shelf to nothing
-  // and no index would ever be asked to mount. These are the numbers a phone produces; everything
-  // downstream - which shelf row an index lands on, and whether that row exists - is real.
-  result.wrapper.vm.initSizeData = function () {
-    this.bookshelfWidth = 1000
-    this.bookshelfHeight = 800
-    this.entitiesPerShelf = 4
-    this.shelvesPerPage = 4
-    this.booksPerFetch = 20
-  }
+  // and no index would ever be asked to mount. Everything downstream - which shelf row an index
+  // lands on, and whether that row exists - is real.
+  stubShelfGeometry(result.wrapper.vm)
 
   mounted.push(result.wrapper)
   return result

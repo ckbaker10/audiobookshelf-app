@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import LazyBookshelf from '@/components/bookshelf/LazyBookshelf.vue'
-import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush } from '../support/harness'
+import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush, stubShelfGeometry } from '../support/harness'
 
 /**
  * Issue #1870 - the Collections tab shows the previous tab's item count.
@@ -48,13 +48,7 @@ function mountCollections({ responses = {}, currentLibraryId = 'lib-1' } = {}) {
   // See offline-library.spec.js: happy-dom reports zero-sized elements, so the real sizing method
   // collapses the shelf and makes any render assertion vacuous. These specs assert the data layer
   // and the published count, which is where the defect lives.
-  mounted.wrapper.vm.initSizeData = function () {
-    this.bookshelfWidth = 1000
-    this.bookshelfHeight = 800
-    this.entitiesPerShelf = 4
-    this.shelvesPerPage = 4
-    this.booksPerFetch = 20
-  }
+  stubShelfGeometry(mounted.wrapper.vm)
 
   return mounted
 }
