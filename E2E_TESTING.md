@@ -248,7 +248,8 @@ Payload shapes are captured from the `audiobookshelf` server pinned at commit
 checkout resolves to the commit.) Not the tracking checkout, which follows upstream.
 
 ```bash
-git -C /home/lukas/repos/audiobookshelf worktree add /home/lukas/repos/abs-2.36.0 v2.36.0
+# from a clone of github.com/advplyr/audiobookshelf
+git worktree add ../abs-2.36.0 v2.36.0
 ```
 
 | Fixture | Captured from |

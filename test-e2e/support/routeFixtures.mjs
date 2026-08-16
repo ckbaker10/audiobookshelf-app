@@ -6,10 +6,11 @@
  * whose provenance is not written down is indistinguishable from one that was invented, so every
  * shape below names the file it came from.
  *
- * The pin is not the tracking checkout at `/home/lukas/repos/audiobookshelf`, which follows
- * upstream. Re-capture with:
+ * Capture against that tag specifically, not against a tracking checkout of the server repo, which
+ * follows upstream and would make "what we captured against" a moving answer. From a clone of
+ * `github.com/advplyr/audiobookshelf`:
  *
- *     git -C /home/lukas/repos/audiobookshelf worktree add /home/lukas/repos/abs-2.36.0 v2.36.0
+ *     git worktree add ../abs-2.36.0 v2.36.0
  *
  * These are shapes, not recordings: field *names* and nesting are the server's, values are the
  * test's. That is the part the app breaks on - it reads `payload.results` and `payload.total`, and
