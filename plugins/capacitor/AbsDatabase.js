@@ -13,6 +13,20 @@ import { registerPlugin, Capacitor, WebPlugin } from '@capacitor/core'
  * @property {string} [refreshToken] - Only passed in when setting config, then stored in secure storage
  */
 
+/**
+ * localStorage key holding the downloaded items this web build should report.
+ *
+ * The rest of this class is already localStorage-backed; local library items were the one thing
+ * that was not, and were answered with the single hardcoded book below no matter what. That is
+ * enough to click through a download UI by hand, but it makes the offline Library tab a fixed
+ * one-item list - so nothing about how it *fills* (paging, virtualisation, row vs grid) can be
+ * exercised in a browser at all.
+ *
+ * Seeding this key makes the web bridge answer the way the Android bridge does, from stored data.
+ * Absent, behaviour is exactly what it was: the one test book.
+ */
+const LOCAL_LIBRARY_ITEMS_KEY = 'localLibraryItems'
+
 class AbsDatabaseWeb extends WebPlugin {
   constructor() {
     super()
@@ -128,7 +142,14 @@ class AbsDatabaseWeb extends WebPlugin {
   async getLocalFolder({ folderId }) {
     return this.getLocalFolders().then((data) => data.value[0])
   }
-  async getLocalLibraryItems(payload) {
+  async getLocalLibraryItems({ mediaType } = {}) {
+    const stored = localStorage.getItem(LOCAL_LIBRARY_ITEMS_KEY)
+    if (stored) {
+      const items = JSON.parse(stored)
+      // The native bridge filters by media type and `db.js` passes the current library's type, so
+      // an unfiltered answer here would put podcasts on a book shelf.
+      return { value: mediaType ? items.filter((li) => li.mediaType === mediaType) : items }
+    }
     return {
       value: [
         {
@@ -207,10 +228,12 @@ class AbsDatabaseWeb extends WebPlugin {
     }
   }
   async getLocalLibraryItemsInFolder({ folderId }) {
-    return this.getLocalLibraryItems()
+    return this.getLocalLibraryItems().then((data) => ({ value: data.value.filter((lli) => lli.folderId == folderId) }))
   }
   async getLocalLibraryItem({ id }) {
-    return this.getLocalLibraryItems().then((data) => data.value[0])
+    // Was `value[0]` regardless of the id asked for, which is indistinguishable from a correct
+    // answer while there is only ever one item.
+    return this.getLocalLibraryItems().then((data) => data.value.find((lli) => lli.id == id) || null)
   }
   async getLocalLibraryItemByLId({ libraryItemId }) {
     return this.getLocalLibraryItems().then((data) => data.value.find((lli) => lli.libraryItemId == libraryItemId))
