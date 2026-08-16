@@ -60,22 +60,32 @@ test.describe('an expired access token', () => {
 })
 
 test.describe('a refresh the server refuses', () => {
+  /**
+   * Opens the shelf knowing the app will navigate away from it before it can finish rendering.
+   *
+   * `waitFor: 'body'` rather than the default `#bookshelf`: the refused refresh ends in
+   * `window.location.href = '/connect?error=…'`, and on a slow machine that redirect wins the race
+   * against the shelf's first paint. Waiting for an element on the page being left is a wait that
+   * can never resolve - which is exactly how this failed in CI while passing locally.
+   */
+  const openExpectingSignOut = (library) =>
+    library.open({ offline: false, connected: true, serverItems: ITEMS, itemsFailFirstWith: 401, refreshStatus: 401, waitFor: 'body' })
+
   test('signs the user out', async ({ library, page }) => {
     // A 401 from the refresh endpoint is the one case where ending the session is correct.
-    await library.open({ offline: false, connected: true, serverItems: ITEMS, itemsFailFirstWith: 401, refreshStatus: 401 })
-    await page.waitForTimeout(2000)
+    await openExpectingSignOut(library)
 
+    // Polled, not slept on: the redirect takes as long as the runner takes.
+    await expect.poll(() => wasSignedOut(page), { timeout: 20_000 }).toBe(true)
     expect(refreshCalls(library)).toBeGreaterThan(0)
-    expect(wasSignedOut(page)).toBe(true)
   })
 
   test('says why, so the connection screen can explain itself', async ({ library, page }) => {
     // The query carries `error=refreshTokenFailed` and the config id, which is what turns a
     // sudden return to the login screen into something the user can read.
-    await library.open({ offline: false, connected: true, serverItems: ITEMS, itemsFailFirstWith: 401, refreshStatus: 401 })
-    await page.waitForTimeout(2000)
+    await openExpectingSignOut(library)
 
-    expect(page.url()).toContain('error=refreshTokenFailed')
+    await expect.poll(() => page.url(), { timeout: 20_000 }).toContain('error=refreshTokenFailed')
     expect(page.url()).toContain('serverConnectionConfigId=')
   })
 })

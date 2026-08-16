@@ -254,7 +254,17 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
     detail pages read `media.tracks.length` directly. Serving a minified item there throws inside
     render, which shows as a *blank page*, not an error — so it reads like a missing fixture rather
     than a malformed one.
-24. **Read the branch before asserting the default.** `getAltViewEnabled` returns **true** when
+24. **Never wait for an element on a page the app is about to leave.** A spec that provokes a
+    redirect — a refused token refresh ends in `window.location.href`, for instance — must not use
+    the default `#bookshelf` anchor, because the redirect races the first paint and wins on a slow
+    machine. Pass `waitFor: 'body'` and poll for the destination. This passed locally and failed in
+    CI for exactly this reason; it reproduces on demand under
+    `Emulation.setCPUThrottlingRate { rate: 20 }` via a CDP session, which is the way to confirm any
+    suspected timing dependence here rather than re-running and hoping.
+25. **Prefer `expect.poll` to `waitForTimeout` for anything the runner's speed affects.** A fixed
+    sleep encodes the machine it was written on. Sleeps are still right for asserting that something
+    did *not* happen, where there is nothing to poll for.
+26. **Read the branch before asserting the default.** `getAltViewEnabled` returns **true** when
     `deviceSettings` is absent and the stored flag otherwise, so an empty object and a missing object
     are different states. Defaults that live in a getter's guard clause are easy to invert by
     accident.
