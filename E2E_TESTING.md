@@ -115,16 +115,7 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**110 specs, 1 failure.** The fix queue is one entry, found by this suite:
-
-**A finished podcast-episode download is never removed from the queue.**
-`DownloadProgressIndicator.onItemDownloadComplete` commits `removeItemDownload(data.libraryItemId)`,
-and that mutation filters on `i.id != id` (`store/globals.js:150-152`). For a book those are the
-same string — `AbsDownloader.kt:180` builds `DownloadItem(libraryItem.id, libraryItem.id, …)` — so
-it works. For a podcast episode the id is `"<libraryItemId>-<episodeId>"` (`:240-241`), nothing
-matches, and the finished episode keeps being counted by the indicator and keeps contributing to the
-progress ratio. It self-heals only when the whole queue drains, which is why it has gone unnoticed.
-See `download-queue.spec.mjs`; the fix belongs on its own branch.
+**111 specs, 0 failures.**
 
 The suite was written against the offline row/grid parity defect and measured it at full size before
 the fix landed:

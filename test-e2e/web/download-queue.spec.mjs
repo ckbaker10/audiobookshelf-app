@@ -146,29 +146,41 @@ test.describe('the download indicator', () => {
 
   /**
    * A **podcast episode** download, as `AbsDownloader.kt:240-241` builds it: the id is
-   * `"${libraryItem.id}-${episode.id}"`, which is deliberately *not* the library item id.
+   * `"${libraryItem.id}-${episode.id}"`, deliberately *not* the library item id.
    */
   test('clears a finished podcast episode download as well', async ({ library, page }) => {
-    // ENABLED FAILING SPEC - a real defect, found by this suite.
+    // Characterization, and a trap worth pinning down.
     //
-    // `onItemDownloadComplete` commits `removeItemDownload(data.libraryItemId)`, and that mutation
-    // filters on `i.id != id` (`store/globals.js:150-152`). For a book the two are the same string
-    // so it works. For a podcast episode the id is `<libraryItemId>-<episodeId>`, nothing matches,
-    // and the finished episode stays in `itemDownloads`.
+    // The completion payload's field is *named* `libraryItemId` but carries the **download item's
+    // id**: `DownloadItemManager.kt:390` does `put("libraryItemId", item.id)`. For a book those are
+    // the same string, so the name looks right; for a podcast episode they differ and the name is
+    // simply wrong. `removeItemDownload` matching on `i.id` is therefore correct, and this spec
+    // exists so nobody "fixes" that mutation to match on the real `libraryItemId` instead.
     //
-    // Visible effect: while several episodes are downloading, each completed one keeps being
-    // counted by the indicator and keeps contributing to the progress ratio. It self-heals only
-    // when the whole queue drains and `onQueueChanged { hasWork: false }` clears everything, which
-    // is why it has gone unnoticed.
-    //
-    // The fix belongs on its own branch: either remove by `id` and have the caller pass
-    // `data.downloadItemId`, or make the mutation match either field.
+    // Doing so would remove *every* episode of a podcast the moment one finished, because episodes
+    // of the same podcast share a library item id. An earlier version of this spec sent the real
+    // library item id here, failed, and was read as a defect - it was the fixture that was wrong.
     await library.open({ offline: false, connected: true, serverItems: [] })
-    await emit(page, 'onDownloadItem', { ...downloadItem([part('p1', { downloadItemId: 'li-1-ep-1' })]), id: 'li-1-ep-1', libraryItemId: 'li-1', mediaType: 'podcast' })
+    const episodeDownloadId = 'li-1-ep-1'
+    await emit(page, 'onDownloadItem', { ...downloadItem([part('p1', { downloadItemId: episodeDownloadId })]), id: episodeDownloadId, libraryItemId: 'li-1', mediaType: 'podcast' })
 
-    await emit(page, 'onItemDownloadComplete', { libraryItemId: 'li-1', localLibraryItem: null, localMediaProgress: null })
+    // What native actually sends: item.id, under the misleading key.
+    await emit(page, 'onItemDownloadComplete', { libraryItemId: episodeDownloadId, localLibraryItem: null, localMediaProgress: null })
 
     await expect(indicator(page)).toBeHidden()
+  })
+
+  test('keeps the other episodes when one of them finishes', async ({ library, page }) => {
+    // The reason the mutation must not match on the real library item id: two episodes of one
+    // podcast share it, so a broadened match would empty the queue on the first completion.
+    await library.open({ offline: false, connected: true, serverItems: [] })
+    await emit(page, 'onDownloadItem', { ...downloadItem([part('p1', { downloadItemId: 'li-1-ep-1' })]), id: 'li-1-ep-1', libraryItemId: 'li-1', mediaType: 'podcast' })
+    await emit(page, 'onDownloadItem', { ...downloadItem([part('p2', { downloadItemId: 'li-1-ep-2' })]), id: 'li-1-ep-2', libraryItemId: 'li-1', mediaType: 'podcast' })
+
+    await emit(page, 'onItemDownloadComplete', { libraryItemId: 'li-1-ep-1', localLibraryItem: null, localMediaProgress: null })
+
+    await expect(indicator(page)).toBeVisible()
+    await expect(indicator(page)).toContainText('1')
   })
 
   test('ignores a malformed completion instead of emptying the queue', async ({ library, page }) => {
