@@ -91,3 +91,6 @@ sw.*
 
 /resources/
 /android/app/release/
+# Playwright (test-e2e)
+test-results
+playwright-report
