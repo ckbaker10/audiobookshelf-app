@@ -14,10 +14,16 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**263 tests, 0 failures.** The fix queue is empty.
+**278 tests, 5 failures.** The fix queue is `bookshelf/offline-library-parity.spec.js`.
 
-That is the target, not a permanent state: a newly found defect *should* make this number non-zero
-until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
+Offline, the row (list) view reaches fewer downloads than the catalogue (grid) view — 9 of 24
+against 10 of 24 at a phone viewport, neither being the whole library. Two mechanisms, described in
+that file's KDoc: `scroll()` returns early with no session, and scrolling *with* a cached session
+fires a request that cannot succeed and re-mounts the first window on top of the scrolled one. The
+fix belongs on `fix-offline-library-parity`.
+
+Zero failures is the target, not a permanent state: a newly found defect *should* make this number
+non-zero until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
 
 Every one of the 29 failures this suite was built around has been fixed and the specs went green
 with their assertions untouched — five reported upstream issues (#542, #1711/#1712, #1335, #1274,
@@ -63,6 +69,7 @@ that quietly returns `undefined` would reproduce the bug inside the test framewo
 | `fakeEventBus()` / `fakeSocket()` | Record emits, expose `listenerCount(event)`, and let a test drive a server-push event without a server. |
 | `fakeRouter()` | Records `push`/`replace` instead of navigating. Recorded rather than throwing, because "did **not** navigate" is a contract too. |
 | `fakeLocalStore()` | Capacitor Preferences, backed by a real object so a write is visible to a later read. Records every call. |
+| `stubShelfGeometry(vm, dims)` | Replaces `LazyBookshelf.initSizeData()` with fixed dimensions, **keeping** the list-view branch (`entitiesPerShelf = 1`). Do not use it in a spec that is about geometry — define `clientWidth`/`clientHeight` and let the real method run. |
 | `flush()` | Drains pending promises, then Vue's render queue. |
 
 `$strings` returns the key itself, not a translation. Tests assert *which* string was chosen —
@@ -135,7 +142,11 @@ Before writing an assertion, ask what would have to be true for it to fail. If t
 ## Deliberately not covered
 
 - `LazyBookshelf`'s virtualised-scroll machinery — roughly 500 lines of geometry that needs real
-  measurements to mean anything.
+  measurements to mean anything. **Partly covered now:** `offline-library-parity.spec.js` supplies
+  the measurements instead of stubbing past them (`clientWidth`/`clientHeight` plus
+  `window.innerWidth`, which `bookWidth` reads separately) and drives real scroll events through
+  `#bookshelf-wrapper`. That reaches the index arithmetic. It does not reach CSS layout, so whether
+  a mounted card is *visible* is still a browser question.
 - iOS, and anything device-bound.
 - The Capacitor bridges themselves. `plugins/db.js` is a thin pass-through to native code that the
   Android suite covers from the other side.

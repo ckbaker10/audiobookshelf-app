@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import LazyBookshelf from '@/components/bookshelf/LazyBookshelf.vue'
-import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush } from '../support/harness'
+import { mountComponent, storeWith, fakeDb, fakeNativeHttp, flush, stubShelfGeometry } from '../support/harness'
 
 /**
  * The Library tab is empty when the app is offline: it does not list downloaded books.
@@ -55,7 +55,8 @@ const serverBook = (id, title) => ({
  * as 0. Left alone, `entitiesPerShelf` collapses and no card is ever mounted, so a render-level
  * assertion would be vacuous - it would pass whether or not the data arrived.
  *
- * So these specs stub the measurement and assert on the **data layer**: `entities`,
+ * So these specs stub the measurement via `stubShelfGeometry` and assert on the **data layer**:
+ * `entities`,
  * `totalEntities`, and the `bookshelf-total-entities` event the toolbar reads. That is the layer
  * the defect actually lives in, and the empty-state block below is driven by `entities.length`, so
  * nothing important is lost. Asserting mounted card components would be testing happy-dom's layout
@@ -74,13 +75,7 @@ function mountLibrary({ user = null, localLibraryItems = [], responses = null } 
     propsData: { page: 'books' }
   })
 
-  mounted.wrapper.vm.initSizeData = function () {
-    this.bookshelfWidth = 1000
-    this.bookshelfHeight = 800
-    this.entitiesPerShelf = 4
-    this.shelvesPerPage = 4
-    this.booksPerFetch = 20
-  }
+  stubShelfGeometry(mounted.wrapper.vm)
 
   return mounted
 }
