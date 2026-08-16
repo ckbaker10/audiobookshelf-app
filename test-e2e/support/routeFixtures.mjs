@@ -60,6 +60,30 @@ export const libraryItemsPayload = (results, total, query = {}) => ({
 })
 
 /**
+ * A book as the **expanded** endpoints return it, with its tracks.
+ *
+ * The library list is `minified=1` and carries `numTracks`; the collection, playlist and item
+ * endpoints return the expanded form, and the detail pages read `media.tracks.length` directly
+ * (`pages/collection/_id.vue:88`). Serving the minified shape there crashes the page on an
+ * undefined `tracks` - which renders as a blank screen, not an error, so the distinction is worth
+ * keeping in the fixtures rather than papering over with one fat object.
+ */
+const expandedBook = (id, title, trackCount = 1) => {
+  const book = serverBook(id, title)
+  return {
+    ...book,
+    isMissing: false,
+    isInvalid: false,
+    media: {
+      ...book.media,
+      tracks: Array.from({ length: trackCount }, (_, i) => ({ index: i + 1, startOffset: i * 600, duration: 600, title: `Track ${i + 1}`, contentUrl: `/s/item/${id}/track-${i + 1}`, mimeType: 'audio/mpeg' })),
+      audioFiles: [],
+      chapters: []
+    }
+  }
+}
+
+/**
  * Result shapes for the non-book shelves.
  *
  * Only the fields the cards actually read, which is the honest minimum: `LazySeriesCard` uses
@@ -80,7 +104,7 @@ export const serverCollection = (id, name, bookCount = 2) => ({
   libraryId: 'lib-1',
   name,
   description: null,
-  books: Array.from({ length: bookCount }, (_, i) => serverBook(`${id}-b${i + 1}`, `${name} ${i + 1}`))
+  books: Array.from({ length: bookCount }, (_, i) => expandedBook(`${id}-b${i + 1}`, `${name} ${i + 1}`))
 })
 
 export const serverPlaylist = (id, name, itemCount = 2) => ({
@@ -89,7 +113,7 @@ export const serverPlaylist = (id, name, itemCount = 2) => ({
   userId: 'u1',
   name,
   description: null,
-  items: Array.from({ length: itemCount }, (_, i) => ({ id: `${id}-i${i + 1}`, libraryItemId: `${id}-b${i + 1}`, libraryItem: serverBook(`${id}-b${i + 1}`, `${name} ${i + 1}`) }))
+  items: Array.from({ length: itemCount }, (_, i) => ({ id: `${id}-i${i + 1}`, libraryItemId: `${id}-b${i + 1}`, libraryItem: expandedBook(`${id}-b${i + 1}`, `${name} ${i + 1}`) }))
 })
 
 /**
@@ -103,6 +127,61 @@ export const libraryDetailPayload = (library) => ({
   filterdata: { authors: [], genres: [], tags: [], series: [], narrators: [], languages: [], numIssues: 0 },
   issues: 0,
   numUserPlaylists: 0
+})
+
+/**
+ * A few seconds of silent 8 kHz mono WAV, built rather than committed.
+ *
+ * `AbsAudioPlayerWeb` uses a real `<audio>` element, so the bytes have to be something Chromium will
+ * actually decode - a stub body leaves `readyState` at 0 and every playback assertion waits forever
+ * on metadata that never arrives. WAV because the header is 44 bytes of arithmetic and needs no
+ * encoder; silence because nothing here is about the sound.
+ */
+export function silentWav({ seconds = 5, sampleRate = 8000 } = {}) {
+  const samples = seconds * sampleRate
+  const buffer = Buffer.alloc(44 + samples)
+  buffer.write('RIFF', 0)
+  buffer.writeUInt32LE(36 + samples, 4)
+  buffer.write('WAVE', 8)
+  buffer.write('fmt ', 12)
+  buffer.writeUInt32LE(16, 16) // PCM header size
+  buffer.writeUInt16LE(1, 20) // PCM
+  buffer.writeUInt16LE(1, 22) // mono
+  buffer.writeUInt32LE(sampleRate, 24)
+  buffer.writeUInt32LE(sampleRate, 28) // byte rate: 8-bit mono
+  buffer.writeUInt16LE(1, 32) // block align
+  buffer.writeUInt16LE(8, 34) // bits per sample
+  buffer.write('data', 36)
+  buffer.writeUInt32LE(samples, 40)
+  buffer.fill(128, 44) // 8-bit PCM silence is mid-scale, not zero
+  return buffer
+}
+
+/**
+ * `POST /api/items/:id/play` - `server/objects/PlaybackSession.js:100-115`.
+ *
+ * `setAudioPlayer` reads `audioTracks` and `currentTime`, then builds the track URL as
+ * `/public/session/<id>/track/<index>` unless the track's own `contentUrl` starts with `/hls`.
+ */
+export const playbackSessionPayload = ({ id = 'session-1', libraryItemId = 's-1', duration = 5, currentTime = 0 } = {}) => ({
+  id,
+  userId: 'u1',
+  libraryId: 'lib-1',
+  libraryItemId,
+  episodeId: null,
+  mediaType: 'book',
+  duration,
+  playMethod: 0, // direct play
+  mediaPlayer: 'html5-mobile',
+  deviceInfo: { deviceId: 'test-device' },
+  serverVersion: SERVER_VERSION,
+  timeListening: 0,
+  startTime: currentTime,
+  currentTime,
+  startedAt: Date.now(),
+  updatedAt: Date.now(),
+  audioTracks: [{ index: 1, startOffset: 0, duration, title: 'Track 1', contentUrl: `/s/item/${libraryItemId}/track-1.wav`, mimeType: 'audio/wav', metadata: null }],
+  libraryItem: null
 })
 
 /** `POST /api/authorize` - `server/Auth.js:96-105`, via `MiscController.authorize`. */
@@ -141,6 +220,10 @@ export async function installRouteFixtures(
     itemsFailFirstWith = null,
     /** Status for `POST <address>/auth/refresh`: 200 refreshes, 401 refuses, 5xx is transient. */
     refreshStatus = 200,
+    /** Seconds of audio in the generated track, and the session's reported duration. */
+    playbackDuration = 5,
+    /** Home-tab category shelves, as `personalized` returns them. */
+    personalized = [],
     isOffline = () => false
   } = {}
 ) {
@@ -180,6 +263,72 @@ export async function installRouteFixtures(
   await context.route(
     '**/ping',
     whenReachable((route) => route.fulfill({ json: { success: true } }))
+  )
+
+  /**
+   * The playback pair: a session to play, and bytes to play from it.
+   *
+   * The audio is served for **any** `/public/session/.../track/...`, because the URL is assembled
+   * from the session id and the track index and a spec should not have to predict it.
+   */
+  await context.route(
+    '**/api/items/*/play*',
+    whenReachable((route) => {
+      const libraryItemId = new URL(route.request().url()).pathname.split('/')[3]
+      route.fulfill({ json: playbackSessionPayload({ libraryItemId, duration: playbackDuration }) })
+    })
+  )
+
+  await context.route('**/public/session/**', (route) => route.fulfill({ body: silentWav({ seconds: playbackDuration }), headers: { 'content-type': 'audio/wav', 'accept-ranges': 'bytes' } }))
+
+  /** `GET /api/items/:id` - the detail page's own fetch. */
+  await context.route(
+    '**/api/items/*',
+    whenReachable((route) => {
+      const url = new URL(route.request().url())
+      // `/play` is handled above; this must not swallow it.
+      if (url.pathname.includes('/play')) return route.fallback()
+      const id = url.pathname.split('/').pop()
+      route.fulfill({ json: { ...serverBook(id, `Book ${id}`), media: { ...serverBook(id, `Book ${id}`).media, audioFiles: [], chapters: [], tracks: [{ index: 1, startOffset: 0, duration: playbackDuration }] } } })
+    })
+  )
+
+  /**
+   * `GET /api/libraries/:id/personalized` - the Home tab's category shelves.
+   *
+   * Each entry is `{ id, label, labelStringKey, type, entities }`; `pages/bookshelf/index.vue`
+   * renders one `bookshelf-shelf` per entry.
+   */
+  await context.route(
+    '**/api/libraries/*/personalized*',
+    whenReachable((route) => route.fulfill({ json: personalized }))
+  )
+
+  /** `GET /api/libraries/:id/search?q=` - three result groups, each its own card type. */
+  await context.route(
+    '**/api/libraries/*/search*',
+    whenReachable((route) => {
+      const q = (new URL(route.request().url()).searchParams.get('q') || '').toLowerCase()
+      const match = (b) => b.media.metadata.title.toLowerCase().includes(q)
+      route.fulfill({ json: { book: libraryItems.filter(match).map((libraryItem) => ({ libraryItem })), podcast: [], series: [], authors: [], tags: [] } })
+    })
+  )
+
+  /** `GET /api/collections/:id` and `/api/playlists/:id` - the detail pages. */
+  await context.route(
+    '**/api/collections/*',
+    whenReachable((route) => {
+      const id = new URL(route.request().url()).pathname.split('/').pop()
+      route.fulfill({ json: collections.find((c) => c.id === id) || collections[0] || null })
+    })
+  )
+
+  await context.route(
+    '**/api/playlists/*',
+    whenReachable((route) => {
+      const id = new URL(route.request().url()).pathname.split('/').pop()
+      route.fulfill({ json: playlists.find((p) => p.id === id) || playlists[0] || null })
+    })
   )
 
   /** `GET <address>/status` - which auth methods the connection screen should offer. */
@@ -266,4 +415,4 @@ export async function installRouteFixtures(
   return { requests }
 }
 
-export { serverBook }
+export { serverBook, expandedBook }

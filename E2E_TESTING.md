@@ -115,7 +115,7 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**74 specs, 0 failures.**
+**100 specs, 0 failures.**
 
 The suite was written against the offline row/grid parity defect and measured it at full size before
 the fix landed:
@@ -174,7 +174,10 @@ in `switch-server.spec.mjs`. Check for the gate before assuming it.
 
 - **Downloading, folder selection, and local playback.** `AbsDownloaderWeb` has no methods at all,
   `AbsFileSystemWeb.selectFolder()` returns undefined, and `AbsAudioPlayer` branches on `local_` and
-  does nothing. Downloads can be *seeded* and browsed, never performed or played.
+  does nothing. Downloads can be *seeded*, browsed and shown with progress; never performed, and
+  never played. **Server** playback is fully covered — `AbsAudioPlayerWeb` is a real 293-line
+  implementation over a real `<audio>` element, so `playback.spec.mjs` drives genuine decode, play,
+  seek and rate changes against generated WAV bytes.
 
 ## Conventions
 
@@ -184,7 +187,7 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
    changing behaviour to satisfy a test. A `data-testid`, or a web-only bridge reading a
    `localStorage` key it already writes, changes nothing a user can observe. The boundary: if
    removing the hook would change what the app *does*, it is not a hook and #4 applies.
-   Currently ten attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
+   Currently eleven attributes (`item-play` included) (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
    `bookshelf-filter`, `bookshelf-sort`, `drawer-action`, `server-config`, and the three option
    lists `filter-option`, `order-option`, `library-option`, each carrying `data-value` and
    `data-selected`) and one seedable key (`localLibraryItems`). Several elements needed no hook at
@@ -242,7 +245,16 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
     `/api/ping`. Unanswered, the app decides the server is unreachable and never reaches
     `/api/authorize`, so a spec about authentication silently exercises the failure path instead.
     When a flow does less than expected, check the request log before suspecting the app.
-22. **Read the branch before asserting the default.** `getAltViewEnabled` returns **true** when
+22. **Never `goto` a page whose `asyncData` depends on being connected.** `asyncData` runs during
+    route resolution, *before* the layout's `attemptConnection` has set `serverConnectionConfig`, so
+    a deep link to `/item/:id`, `/collection/:id` or `/playlist/:id` redirects away and the spec
+    tests nothing. Navigate the way a user does — from the shelf, by clicking a card.
+23. **Serve the shape the endpoint really returns.** The library list is `minified=1` and carries
+    `numTracks`; the collection, playlist and item endpoints return the expanded form, and the
+    detail pages read `media.tracks.length` directly. Serving a minified item there throws inside
+    render, which shows as a *blank page*, not an error — so it reads like a missing fixture rather
+    than a malformed one.
+24. **Read the branch before asserting the default.** `getAltViewEnabled` returns **true** when
     `deviceSettings` is absent and the stored flag otherwise, so an empty object and a missing object
     are different states. Defaults that live in a getter's guard clause are easy to invert by
     accident.
@@ -268,6 +280,9 @@ test-e2e/
     shelf-layout.spec.mjs           alt view, and rotating the device
     series-books-and-scroll.spec.mjs  the series shelf, scroll restore
     auth-refresh.spec.mjs           401 -> refresh, and the failure taxonomy
+    downloads-and-progress.spec.mjs downloads screens, progress bars on cards
+    playback.spec.mjs               a real <audio> element playing real bytes
+    home-search-detail.spec.mjs     Home tab, search, collection/playlist pages
 ```
 
 **Everything here is `.mjs`, and it has to be.** The package is CommonJS, so Playwright loads a `.js`

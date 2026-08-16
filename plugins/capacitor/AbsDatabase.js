@@ -27,6 +27,17 @@ import { registerPlugin, Capacitor, WebPlugin } from '@capacitor/core'
  */
 const LOCAL_LIBRARY_ITEMS_KEY = 'localLibraryItems'
 
+/**
+ * Same idea as [LOCAL_LIBRARY_ITEMS_KEY], for the two remaining hardcoded answers.
+ *
+ * `getLocalFolders` and `getAllLocalMediaProgress` returned one fixed folder and one fixed progress
+ * record whatever was stored, which makes the downloads screens and every progress indicator a
+ * constant in a browser. Seeding these lets those render from data; absent a seed, both answer
+ * exactly what they always did.
+ */
+const LOCAL_FOLDERS_KEY = 'localFolders'
+const LOCAL_MEDIA_PROGRESS_KEY = 'localMediaProgress'
+
 class AbsDatabaseWeb extends WebPlugin {
   constructor() {
     super()
@@ -126,6 +137,8 @@ class AbsDatabaseWeb extends WebPlugin {
   // For testing on web
   //
   async getLocalFolders() {
+    const stored = localStorage.getItem(LOCAL_FOLDERS_KEY)
+    if (stored) return { value: JSON.parse(stored) }
     return {
       value: [
         {
@@ -239,6 +252,8 @@ class AbsDatabaseWeb extends WebPlugin {
     return this.getLocalLibraryItems().then((data) => data.value.find((lli) => lli.libraryItemId == libraryItemId))
   }
   async getAllLocalMediaProgress() {
+    const stored = localStorage.getItem(LOCAL_MEDIA_PROGRESS_KEY)
+    if (stored) return { value: JSON.parse(stored) }
     return {
       value: [
         {
