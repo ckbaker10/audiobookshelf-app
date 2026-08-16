@@ -3,7 +3,7 @@
     <div v-show="!loggedIn" class="mt-8 bg-primary overflow-hidden shadow rounded-lg px-4 py-6 w-full">
       <!-- list of server connection configs -->
       <template v-if="!showForm">
-        <div v-for="config in serverConnectionConfigs" :key="config.id" class="border-b border-fg/10 py-4">
+        <div v-for="config in serverConnectionConfigs" :key="config.id" data-testid="server-config" :data-value="config.id" class="border-b border-fg/10 py-4">
           <div class="flex items-center my-1 relative space-x-2" @click="connectToServer(config)">
             <div class="grow inline-flex items-center overflow-hidden">
               <p class="text-base text-fg truncate">{{ config.name }}</p>

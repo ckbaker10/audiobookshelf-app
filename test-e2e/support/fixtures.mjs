@@ -1,5 +1,5 @@
 import { test as base, expect, devices } from '@playwright/test'
-import { seedDevice, localBooks } from './seed.mjs'
+import { seedDevice, localBooks, localProgress, localFolder } from './seed.mjs'
 import { installRouteFixtures, serverBook } from './routeFixtures.mjs'
 import { contentTypeFor, resolveWithFallback } from './dist.mjs'
 
@@ -60,14 +60,16 @@ export const test = base.extend({
       await storeAgrees(true)
     }
 
-    const open = async ({ downloads = 24, connected = true, offline = true, serverItems = [] } = {}) => {
+    let api = { requests: [] }
+
+    const open = async ({ downloads = 24, connected = true, offline = true, serverItems = [], at = '/bookshelf/library', waitFor = '#bookshelf', deviceSettings = {}, refreshToken = 'test-refresh-token', mediaProgress = null, folders = null, ...fixtures } = {}) => {
       const books = localBooks(downloads)
-      await installRouteFixtures(context, { libraryItems: serverItems, isOffline: () => network.offline })
+      api = await installRouteFixtures(context, { libraryItems: serverItems, isOffline: () => network.offline, ...fixtures })
       // Always, not only when offline: on a device the web assets ship in the APK and are served
       // locally, so they stay available when the network does not. Registered after the API
       // handlers, and scoped to the app's own origin, so the two never compete.
       await serveAppFromDisk(context, baseURL)
-      await seedDevice(context, { downloads: books, connected })
+      await seedDevice(context, { downloads: books, connected, deviceSettings, refreshToken, mediaProgress, folders })
 
       /**
        * The page is loaded **online, then taken offline** - not the other way round.
@@ -81,8 +83,11 @@ export const test = base.extend({
        * the app offline is not reachable in a browser; the unit suite covers it, by calling `init()`
        * with `networkConnected: false`.
        */
-      await page.goto('/bookshelf/library')
-      await page.locator('#bookshelf').waitFor()
+      await page.goto(at)
+      // `#bookshelf` only exists on the shelf routes; the downloads and local-media screens have
+      // their own roots, so a spec opening one passes its own anchor rather than timing out on an
+      // element that will never appear.
+      if (waitFor) await page.locator(waitFor).waitFor()
       await storeAgrees(true)
 
       if (offline) await goOffline()
@@ -94,11 +99,14 @@ export const test = base.extend({
       return { books }
     }
 
-    await use({ open, goOffline, goOnline, page, context })
+    /** Library requests only, newest last - the shelf's own traffic, without auth or library-list noise. */
+    const libraryRequests = () => api.requests.filter((r) => /\/api\/libraries\/[^/]+\/(items|series|collections|playlists)/.test(r.path))
+
+    await use({ open, goOffline, goOnline, libraryRequests, api: () => api.requests, page, context })
   }
 })
 
-export { expect, devices, serverBook, localBooks }
+export { expect, devices, serverBook, localBooks, localProgress, localFolder }
 
 /**
  * Every entity index that can be reached by scrolling the shelf from top to bottom.
