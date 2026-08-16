@@ -14,16 +14,16 @@ npm test -- test/bookshelf/offline-library.spec.js
 
 ## Current state
 
-**278 tests, 5 failures.** The fix queue is `bookshelf/offline-library-parity.spec.js`.
+**278 tests, 0 failures.** The fix queue is empty.
 
-Offline, the row (list) view reaches fewer downloads than the catalogue (grid) view — 9 of 24
-against 10 of 24 at a phone viewport, neither being the whole library. Two mechanisms, described in
-that file's KDoc: `scroll()` returns early with no session, and scrolling *with* a cached session
-fires a request that cannot succeed and re-mounts the first window on top of the scrolled one. The
-fix belongs on `fix-offline-library-parity`.
+The most recent entry on it was the offline row/grid parity defect: the row (list) view reached
+fewer downloads than the catalogue (grid) view — 9 of 24 against 10 of 24 here, 8 against 10 in the
+browser — and neither reached the whole library. Both mechanisms are described in
+`bookshelf/offline-library-parity.spec.js`'s KDoc, and both are fixed in `LazyBookshelf.scroll` and
+`handleScroll`. The specs went green with their assertions untouched.
 
-Zero failures is the target, not a permanent state: a newly found defect *should* make this number
-non-zero until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
+That is the target, not a permanent state: a newly found defect *should* make this number non-zero
+until its fix lands. If the suite is red, the failing specs' KDoc says what is outstanding.
 
 Every one of the 29 failures this suite was built around has been fixed and the specs went green
 with their assertions untouched — five reported upstream issues (#542, #1711/#1712, #1335, #1274,
