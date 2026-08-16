@@ -41,13 +41,22 @@ If you change the suite, re-run it and update this number from the run.
 
 ## Conventions
 
-1. **Component tests, not e2e.** Mount a component with fake plugins, assert what it renders and
-   what it asks for. No running Nuxt server, no browser, no device. Same reasoning as the Android
-   suite's host-JVM rule.
+1. **Component tests, not e2e — in this directory.** Mount a component with fake plugins, assert
+   what it renders and what it asks for. No running Nuxt server, no browser, no device. Same
+   reasoning as the Android suite's host-JVM rule.
+
+   The browser tier now exists alongside it, in `test-e2e/` with its own conventions — see
+   `E2E_TESTING.md`. The boundary: if a question can be answered by mounting one component, it
+   belongs here, because a failing e2e spec is harder to diagnose than a failing component spec.
+   Go up a tier only for what this one structurally cannot see — real measured layout, real
+   connectivity transitions, and whether a mounted card is actually visible.
 2. **A known defect is an enabled failing test, never `.skip`.** The failure count is the fix
    queue.
 3. **Assert the contract, not the observed behaviour.** Write what *should* happen and let it fail.
-4. **Do not change production code to make a test pass.**
+4. **Do not change production code to make a test pass.** A *test hook* — a `data-testid`, or a
+   web-only bridge reading a key it already writes — is not that: it changes nothing a user can
+   observe. The test is whether removing it would change what the app does. `E2E_TESTING.md`
+   convention #6 states the boundary and lists every hook that exists.
 5. **Test names are load-bearing.** If deleting the assertion would leave the name still "true",
    the name overclaims.
 
