@@ -3,6 +3,7 @@ package com.audiobookshelf.app.managers
 import com.audiobookshelf.app.support.RecordingDownloadCallback
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.TimeUnit
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import okhttp3.mockwebserver.SocketPolicy
@@ -292,6 +293,105 @@ class InternalDownloadManagerTest {
     assertTrue("hasAvailableSpace must be consulted even when the length is unknown", consulted)
     assertTrue(callback.failed)
     assertEquals(0L, destination.length())
+  }
+
+
+  /**
+   * A slow link is not a broken one.
+   *
+   * The failure modes a cellular connection actually has are "slow" and "cuts off at any point" -
+   * not a different network type. This is the first of those: bytes trickling in below the read
+   * timeout must still produce a correct file and monotonic progress, not a partial write or a
+   * duplicate completion.
+   */
+  @Test
+  fun `a slow trickling body still completes with the whole file`() {
+    server.enqueue(
+            MockResponse()
+                    .setResponseCode(200)
+                    .setBody("abcdef")
+                    .throttleBody(1, 30, TimeUnit.MILLISECONDS)
+    )
+    val destination = File(downloadDirectory, "book.part")
+    val callback = download(destination, expectedSize = 6)
+
+    callback.awaitCompletion()
+
+    assertFalse(callback.failed)
+    assertArrayEquals("abcdef".toByteArray(), destination.readBytes())
+    val percentages = callback.progressPercentages()
+    assertEquals(percentages.sorted(), percentages)
+  }
+
+  /**
+   * The second failure mode: slow, then gone.
+   *
+   * Distinct from the existing clean-disconnect test, because the bytes arrive over several reads
+   * before the socket dies - which is what a phone losing signal mid-chapter looks like, and the
+   * case where a writer that buffers without flushing loses everything it had.
+   */
+  @Test
+  fun `a body that stalls and then dies keeps what already arrived`() {
+    server.enqueue(
+            MockResponse()
+                    .setResponseCode(200)
+                    .setBody("abcdef")
+                    .throttleBody(1, 30, TimeUnit.MILLISECONDS)
+                    .setSocketPolicy(SocketPolicy.DISCONNECT_DURING_RESPONSE_BODY)
+    )
+    val destination = File(downloadDirectory, "book.part")
+    val callback = download(destination, expectedSize = 6)
+
+    callback.awaitCompletion()
+
+    assertTrue(callback.failed)
+    assertTrue("nothing was kept, so the next attempt cannot resume", destination.length() > 0)
+    assertTrue(destination.length() < 6)
+  }
+
+  /**
+   * A connection that drops twice.
+   *
+   * Every other resume test here interrupts once. A flapping link resumes from a *second* partial
+   * offset, and the range for that one is computed from the staging file as it now stands - so an
+   * implementation that remembered the first offset, or that recomputed from the original zero,
+   * appends at the wrong place and produces a corrupt file that is exactly the expected length.
+   */
+  @Test
+  fun `a second interruption resumes from the new partial offset`() {
+    // First resume: two more bytes arrive, still short of the expected six.
+    server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 2-3/6").setBody("cd"))
+    val destination = File(downloadDirectory, "book.part").apply { writeText("ab") }
+    download(destination, expectedSize = 6).awaitCompletion()
+
+    // Second resume: the rest.
+    server.enqueue(MockResponse().setResponseCode(206).setHeader("Content-Range", "bytes 4-5/6").setBody("ef"))
+    val callback = download(destination, expectedSize = 6)
+    callback.awaitCompletion()
+
+    assertFalse(callback.failed)
+    assertArrayEquals("abcdef".toByteArray(), destination.readBytes())
+    assertEquals("bytes=2-", server.takeRequest().getHeader("Range"))
+    assertEquals("bytes=4-", server.takeRequest().getHeader("Range"))
+  }
+
+  /**
+   * Resuming a file that is already whole must not append.
+   *
+   * The shape a flapping link produces when the last interruption happened after the final byte
+   * landed but before completion was recorded. Appending here yields a file longer than expected
+   * from a server that did nothing wrong.
+   */
+  @Test
+  fun `a resume that returns the whole body again does not double the file`() {
+    server.enqueue(MockResponse().setResponseCode(200).setBody("abcdef"))
+    val destination = File(downloadDirectory, "book.part").apply { writeText("abcdef") }
+    val callback = download(destination, expectedSize = 6)
+
+    callback.awaitCompletion()
+
+    assertArrayEquals("abcdef".toByteArray(), destination.readBytes())
+    assertEquals(6L, destination.length())
   }
 
   private fun download(

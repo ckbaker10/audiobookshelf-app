@@ -86,7 +86,7 @@ Test-only build settings in `android/app/build.gradle`, each load-bearing:
 
 ## 3. Current state
 
-**560 tests, 0 failures.** The fix queue is empty.
+**564 tests, 0 failures.** The fix queue is empty.
 
 That is the target state, not a permanent one: §1 rule 3 means a newly found defect *should* make
 this number non-zero until its fix lands. If you are reading this and the suite is red, check §7.1
@@ -124,7 +124,7 @@ global number mostly measures how much Android-bound code exists.
 | `device/FolderScannerTest` | Internal-storage scan, cover adoption, re-download behaviour |
 | `device/DeviceManagerVersionTest` | Server-version gating |
 | `managers/DownloadIntegrityTest` | Download integrity with unknown/zero expected size |
-| `managers/InternalDownloadManagerTest` | Transfer protocol: truncation, Range 206/200/416, headers |
+| `managers/InternalDownloadManagerTest` | Transfer protocol: truncation, Range 206/200/416, headers, and the two failure modes a slow link actually has - a throttled body, and one that stalls then dies |
 | `managers/DownloadItemManagerTest`, `IncompleteDownloadCleanupTest` | Queue state, restore, retention |
 | `managers/DbManagerPersistenceTest`, `DbManagerCleanupTest` | Paper persistence and cleanup rules |
 | `media/ExternalPauseControlTest` | Pause from notification, lock screen, Bluetooth, Android Auto |
