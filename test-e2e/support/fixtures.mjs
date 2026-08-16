@@ -62,9 +62,9 @@ export const test = base.extend({
 
     let api = { requests: [] }
 
-    const open = async ({ downloads = 24, connected = true, offline = true, serverItems = [] } = {}) => {
+    const open = async ({ downloads = 24, connected = true, offline = true, serverItems = [], at = '/bookshelf/library', ...fixtures } = {}) => {
       const books = localBooks(downloads)
-      api = await installRouteFixtures(context, { libraryItems: serverItems, isOffline: () => network.offline })
+      api = await installRouteFixtures(context, { libraryItems: serverItems, isOffline: () => network.offline, ...fixtures })
       // Always, not only when offline: on a device the web assets ship in the APK and are served
       // locally, so they stay available when the network does not. Registered after the API
       // handlers, and scoped to the app's own origin, so the two never compete.
@@ -83,7 +83,7 @@ export const test = base.extend({
        * the app offline is not reachable in a browser; the unit suite covers it, by calling `init()`
        * with `networkConnected: false`.
        */
-      await page.goto('/bookshelf/library')
+      await page.goto(at)
       await page.locator('#bookshelf').waitFor()
       await storeAgrees(true)
 

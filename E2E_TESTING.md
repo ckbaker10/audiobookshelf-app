@@ -56,11 +56,11 @@ Error: Request to https://cdn.playwright.dev/builds/cft/151.0.7922.34/linux64/ch
 timed out after 30000ms
 ```
 
-**On this machine it was IPv6, and `RES_OPTIONS=no-aaaa` is the fix** — hence the prefix on the
-commands above. The CDN resolves to an AAAA record that the host cannot route, Node tries it first
-and waits out the timeout rather than falling back to IPv4. Nothing about the CDN is blocked, which
-is why the failure is so misleading: `curl` may well succeed while `npx playwright install` does not,
-because they disagree about address-family preference.
+**On this machine it was IPv6, and `RES_OPTIONS=no-aaaa` is the fix.** The CDN resolves to an AAAA
+record that the host cannot route, Node tries it first and waits out the timeout rather than falling
+back to IPv4. Nothing about the CDN is blocked, which is why the failure is so misleading: `curl` may
+well succeed while `npx playwright install` does not, because they disagree about address-family
+preference.
 
 Try that before anything else:
 
@@ -115,7 +115,7 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**26 specs, 0 failures.**
+**50 specs, 0 failures.**
 
 The suite was written against the offline row/grid parity defect and measured it at full size before
 the fix landed:
@@ -175,9 +175,10 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
    changing behaviour to satisfy a test. A `data-testid`, or a web-only bridge reading a
    `localStorage` key it already writes, changes nothing a user can observe. The boundary: if
    removing the hook would change what the app *does*, it is not a hook and #4 applies.
-   Currently seven attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
-   `bookshelf-filter`, `bookshelf-sort`, `filter-option`, `order-option` — the last two carrying
-   `data-value` and `data-selected`) and one seedable key (`localLibraryItems`).
+   Currently eight attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
+   `bookshelf-filter`, `bookshelf-sort`, and the three option lists `filter-option`, `order-option`,
+   `library-option`, each carrying `data-value` and `data-selected`) and one seedable key
+   (`localLibraryItems`).
 7. **Prefer the ids the app already has.** Cards are `book-card-N` and the scroll container is
    `#bookshelf-wrapper`. Both are structural, both are already selected on by the unit specs, and
    neither is a `data-testid` that had to be added. Add a hook only where the alternative is a
@@ -191,15 +192,36 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
     `indexesReachableByScrolling()` takes the union over a sweep, which is what "can the user get to
     their books" actually means.
 11. **Watch a new spec fail before believing it.** Break the production code it covers, confirm it
-    goes red, put the code back. This is not ceremony: the first run of this suite found three
-    harness bugs that made specs pass for the wrong reason, and the filter/sort specs passed on
-    their first write while asserting a query the app had already sent at page load.
+    goes red, put the code back. Not ceremony — every rule from 12 down was found this way, by specs
+    that were green and wrong. Check the *scope* too: a mutation should kill the specs about the
+    thing it broke and no others. If it kills more, a spec is asserting something it does not claim.
 12. **Never drive a setting to its default value.** `mobileOrderBy` defaults to `addedAt` and
     `mobileFilterBy` to `all` (`store/user.js:10-12`). A spec that "changes" a setting to what it
     already was asserts the app's starting state and passes with the feature disabled.
 13. **Asserting on the last request is not asserting that a request happened.** With no refetch, the
-    last request is still the one from page load. Require the count to grow — `expectRefetch()` in
-    `library-filter-sort.spec.mjs` is the pattern.
+    last request is still the one from page load, so the assertion holds. Require the count to grow
+    first — `expectRefetch()` in `library-filter-sort.spec.mjs` is the pattern.
+14. **Assert a lower bound, never only an upper one.** `expect(cards).toBeLessThanOrEqual(rows * 4)`
+    passes when the selector finds nothing at all. That is how three shelves were "covered" while
+    matching zero elements: the card id prefix is per entity (see the table below), not
+    `book-card-` everywhere. Pair every bound with `toBeGreaterThan(0)`.
+15. **Bind test attributes as explicit strings.** Vue 2 *removes* an attribute bound to `false`, so
+    `:data-selected="a === b"` yields no attribute rather than `"false"` and the negative assertion
+    cannot be written. Use `:data-selected="a === b ? 'true' : 'false'"`.
+16. **Make the two sides of a change differ in the fixture data.** Convention 12 applied to
+    fixtures: if both libraries hold twenty items, a switch that silently does nothing looks
+    identical to one that works. `library-switch.spec.mjs` uses 20 against 7 deliberately.
+17. **Assert what the app asked for *and* what it rendered.** A query-only assertion cannot see a
+    shelf that fetched correctly and rendered nothing — the offline Library tab did exactly that for
+    three commits. A render-only assertion cannot tell "rendered the wrong thing" from "asked for
+    the wrong thing", which are different defects with different fixes.
+18. **A spec that asserts a non-action needs its own, inverted mutation.** "Does nothing when the
+    current library is chosen again" survives every mutation that *disables* the feature, because
+    disabled code also does nothing. It is killed only by removing the early return that makes it
+    true. Disabling the feature is not a proof for these; breaking the guard is.
+19. **Load online, then go offline.** Offline emulation does not survive a navigation, so
+    `setOffline(true)` before `goto` silently produces an online page. This tier can only model a
+    connection that dropped while a screen was open — never an app that started offline.
 
 ## The harness
 
@@ -213,8 +235,11 @@ test-e2e/
     routeFixtures.mjs      /api handlers, with capture provenance in the header
     dist.mjs               resolving a URL path to a file in dist/
   web/
-    smoke.spec.mjs
-    offline-library-parity.spec.mjs
+    smoke.spec.mjs                  the build serves, boots and routes
+    offline-library-parity.spec.mjs downloads offline, row vs grid
+    library-filter-sort.spec.mjs    filter, sort, direction toggle
+    entity-shelves.spec.mjs         series, collections, playlists
+    library-switch.spec.mjs         switching library from the app bar
 ```
 
 **Everything here is `.mjs`, and it has to be.** The package is CommonJS, so Playwright loads a `.js`
@@ -233,6 +258,27 @@ here. `support/dist.mjs` is shared by both paths so they cannot disagree about w
 fulfilled request succeeds while the browser is offline. Without that check the app authenticates
 against a server it is supposed to be unable to see, and every offline spec quietly tests the online
 path — which is exactly what happened on the first run here.
+
+**Every API request is recorded**, with its query already parsed, and reachable from a spec as
+`library.libraryRequests()`. The outgoing request is the assertable half of anything query-driven: a
+filter or a sort is a query string long before it is a different set of cards.
+
+### Selecting cards
+
+There is no single card selector. `getComponentClass` picks a different component per entity
+(`mixins/bookshelfCardsHelpers.js:17-22`), and each has its own id prefix:
+
+| Shelf | Card element |
+| --- | --- |
+| books (grid or row) | `[id^="book-card-"]` |
+| series | `[id^="series-card-"]` |
+| collections | `[id^="collection-card-"]` |
+| playlists | `[id^="playlist-card-"]` |
+
+Using `book-card-` on a series shelf matches nothing, which is silent unless the assertion has a
+lower bound (convention 14). Asserting *zero* `book-card-` elements on a non-book shelf is a real
+assertion, though: it catches a fall-through to `LazyBookCard`, which renders something plausible
+from the wrong fields.
 
 **Seeding.** `seed.js` writes two keys through `addInitScript`, before any page script runs — a seed
 applied after navigation is a page too late, because `layouts/default.vue` reads device data on
