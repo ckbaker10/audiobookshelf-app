@@ -115,7 +115,16 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**100 specs, 0 failures.**
+**110 specs, 1 failure.** The fix queue is one entry, found by this suite:
+
+**A finished podcast-episode download is never removed from the queue.**
+`DownloadProgressIndicator.onItemDownloadComplete` commits `removeItemDownload(data.libraryItemId)`,
+and that mutation filters on `i.id != id` (`store/globals.js:150-152`). For a book those are the
+same string — `AbsDownloader.kt:180` builds `DownloadItem(libraryItem.id, libraryItem.id, …)` — so
+it works. For a podcast episode the id is `"<libraryItemId>-<episodeId>"` (`:240-241`), nothing
+matches, and the finished episode keeps being counted by the indicator and keeps contributing to the
+progress ratio. It self-heals only when the whole queue drains, which is why it has gone unnoticed.
+See `download-queue.spec.mjs`; the fix belongs on its own branch.
 
 The suite was written against the offline row/grid parity defect and measured it at full size before
 the fix landed:
@@ -283,7 +292,25 @@ test-e2e/
     downloads-and-progress.spec.mjs downloads screens, progress bars on cards
     playback.spec.mjs               a real <audio> element playing real bytes
     home-search-detail.spec.mjs     Home tab, search, collection/playlist pages
+    download-queue.spec.mjs         the indicator, driven by injected bridge events
 ```
+
+### Downloads: what this tier can and cannot say
+
+The transfer is Kotlin. `InternalDownloadManager` streams the bytes and `DownloadItemManager` runs
+the queue, and **no JavaScript in this app pauses, resumes, retries or cancels a download** — the
+frontend only displays events pushed over the bridge.
+
+So every question about behaviour under a bad network — disconnects mid-body, resuming from a
+partial file, a slow link that stalls and dies, validating what arrived — is answered in
+`InternalDownloadManagerTest` and `DownloadIntegrityTest` against MockWebServer, where the network
+can actually be reduced to its failure modes. A browser spec asserting "the queue survives a
+disconnect" would be asserting that nothing happens, and would pass whether or not Android behaves.
+
+What this tier *can* say is whether the indicator shows the right thing given the events native says
+it sent. Those events are injected through `Capacitor.Plugins.AbsDownloader.notifyListeners`, which
+is a real function on the web platform because `AbsDownloaderWeb` is an empty `WebPlugin` — it has
+the listener machinery and no methods, which is also why a download can never be *started* here.
 
 **Everything here is `.mjs`, and it has to be.** The package is CommonJS, so Playwright loads a `.js`
 config through `require` and an ESM one fails at `exports is not defined`; and a `.js` spec is
