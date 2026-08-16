@@ -115,7 +115,7 @@ Playwright version. Or set `PLAYWRIGHT_BROWSERS_PATH` to a shared location.
 
 ## Current state
 
-**16 specs, 0 failures.**
+**26 specs, 0 failures.**
 
 The suite was written against the offline row/grid parity defect and measured it at full size before
 the fix landed:
@@ -175,8 +175,9 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
    changing behaviour to satisfy a test. A `data-testid`, or a web-only bridge reading a
    `localStorage` key it already writes, changes nothing a user can observe. The boundary: if
    removing the hook would change what the app *does*, it is not a hook and #4 applies.
-   Currently three attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`) and one
-   seedable key (`localLibraryItems`).
+   Currently seven attributes (`bookshelf-total`, `bookshelf-view-toggle`, `offline-notice`,
+   `bookshelf-filter`, `bookshelf-sort`, `filter-option`, `order-option` — the last two carrying
+   `data-value` and `data-selected`) and one seedable key (`localLibraryItems`).
 7. **Prefer the ids the app already has.** Cards are `book-card-N` and the scroll container is
    `#bookshelf-wrapper`. Both are structural, both are already selected on by the unit specs, and
    neither is a `data-testid` that had to be added. Add a hook only where the alternative is a
@@ -189,6 +190,16 @@ These extend `FRONTEND_TESTING.md`'s five. Numbering continues from it.
     of view are removed. Counting cards at the bottom measures the window size, not the library.
     `indexesReachableByScrolling()` takes the union over a sweep, which is what "can the user get to
     their books" actually means.
+11. **Watch a new spec fail before believing it.** Break the production code it covers, confirm it
+    goes red, put the code back. This is not ceremony: the first run of this suite found three
+    harness bugs that made specs pass for the wrong reason, and the filter/sort specs passed on
+    their first write while asserting a query the app had already sent at page load.
+12. **Never drive a setting to its default value.** `mobileOrderBy` defaults to `addedAt` and
+    `mobileFilterBy` to `all` (`store/user.js:10-12`). A spec that "changes" a setting to what it
+    already was asserts the app's starting state and passes with the feature disabled.
+13. **Asserting on the last request is not asserting that a request happened.** With no refetch, the
+    last request is still the one from page load. Require the count to grow — `expectRefetch()` in
+    `library-filter-sort.spec.mjs` is the pattern.
 
 ## The harness
 

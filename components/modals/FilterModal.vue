@@ -9,7 +9,7 @@
       <div class="w-full overflow-x-hidden overflow-y-auto bg-primary rounded-lg border border-fg/20 mt-8" style="max-height: 75%" @click.stop>
         <ul v-show="!sublist" class="h-full w-full" role="listbox" aria-labelledby="listbox-label">
           <template v-for="item in items">
-            <li :key="item.value" class="text-fg select-none relative py-4 pr-9 cursor-pointer" :class="item.value === selected ? 'bg-bg bg-opacity-50' : ''" role="option" @click="clickedOption(item)">
+            <li :key="item.value" data-testid="filter-option" :data-value="item.value" :data-selected="item.value === selected" class="text-fg select-none relative py-4 pr-9 cursor-pointer" :class="item.value === selected ? 'bg-bg bg-opacity-50' : ''" role="option" @click="clickedOption(item)">
               <div class="flex items-center justify-between">
                 <span class="font-normal ml-3 block truncate text-lg">{{ item.text }}</span>
               </div>

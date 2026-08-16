@@ -60,9 +60,11 @@ export const test = base.extend({
       await storeAgrees(true)
     }
 
+    let api = { requests: [] }
+
     const open = async ({ downloads = 24, connected = true, offline = true, serverItems = [] } = {}) => {
       const books = localBooks(downloads)
-      await installRouteFixtures(context, { libraryItems: serverItems, isOffline: () => network.offline })
+      api = await installRouteFixtures(context, { libraryItems: serverItems, isOffline: () => network.offline })
       // Always, not only when offline: on a device the web assets ship in the APK and are served
       // locally, so they stay available when the network does not. Registered after the API
       // handlers, and scoped to the app's own origin, so the two never compete.
@@ -94,7 +96,10 @@ export const test = base.extend({
       return { books }
     }
 
-    await use({ open, goOffline, goOnline, page, context })
+    /** Library requests only, newest last - the shelf's own traffic, without auth or library-list noise. */
+    const libraryRequests = () => api.requests.filter((r) => /\/api\/libraries\/[^/]+\/(items|series|collections|playlists)/.test(r.path))
+
+    await use({ open, goOffline, goOnline, libraryRequests, api: () => api.requests, page, context })
   }
 })
 

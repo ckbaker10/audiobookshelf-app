@@ -77,6 +77,14 @@ export const authorizePayload = (user) => ({
  */
 export async function installRouteFixtures(context, { libraryItems = [], user = { id: 'u1', username: 'jane', type: 'user' }, isOffline = () => false } = {}) {
   /**
+   * Every API request the app made, in order, with its query already parsed.
+   *
+   * The app's *outgoing* request is the assertable half of anything query-driven - a filter or a
+   * sort is a query string long before it is a different set of cards, and asserting only on the
+   * rendered result cannot tell "asked for the wrong thing" from "rendered the wrong thing".
+   */
+  const requests = []
+  /**
    * Route handlers run *before* the network stack, so `context.setOffline(true)` does not reach
    * them - a fulfilled request succeeds while the browser is offline. Without this check the app
    * authenticates and loads its library from a server it is supposed to be unable to see, and every
@@ -85,7 +93,11 @@ export async function installRouteFixtures(context, { libraryItems = [], user = 
    * `internetdisconnected` is the error a real unreachable server produces, so the app's failure
    * handling takes the same branch it takes on a device.
    */
-  const whenReachable = (handler) => (route) => (isOffline() ? route.abort('internetdisconnected') : handler(route))
+  const whenReachable = (handler) => (route) => {
+    const url = new URL(route.request().url())
+    requests.push({ method: route.request().method(), path: url.pathname, query: Object.fromEntries(url.searchParams), offline: isOffline() })
+    return isOffline() ? route.abort('internetdisconnected') : handler(route)
+  }
 
   await context.route('**/socket.io/**', (route) => route.abort())
 
@@ -109,6 +121,8 @@ export async function installRouteFixtures(context, { libraryItems = [], user = 
     '**/api/libraries',
     whenReachable((route) => route.fulfill({ json: { libraries: [{ id: 'lib-1', name: 'Main', mediaType: 'book' }] } }))
   )
+
+  return { requests }
 }
 
 export { serverBook }
